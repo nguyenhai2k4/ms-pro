@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ADR-003 locks Node 20 LTS. Pin CI to it even when a developer's machine runs newer.
+  NODE_VERSION: '20'
+
+jobs:
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r --if-present typecheck
+
+      - name: Lint
+        run: pnpm -r --if-present lint
+
+      - name: Format check
+        run: pnpm format
+
+      - name: Unit tests
+        run: pnpm -r --if-present test
+
+      - name: Build
+        run: pnpm -r --if-present build
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Perf budgets are tested, not assumed (CLAUDE.md invariant 5, FR-SCH-06 / FR-VIEW-02).
+  # The job exists from P0 so the harness is wired before there is anything to measure; it
+  # becomes blocking when packages/cpm-engine lands in P2. It must never be made non-blocking
+  # to get a release out — re-scope the phase instead (docs/MODEL-ROUTING.md guardrail 7).
+  perf:
+    name: perf budgets (FR-SCH-06, FR-VIEW-02)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Run perf suites
+        run: pnpm -r --if-present perf

@@ -1,0 +1,32 @@
+# Build image for a Node service in this monorepo (apps/api today; apps/scheduler from P2).
+#   docker build -f infra/Dockerfile.node --build-arg APP=api -t projectapp-api .
+#
+# ADR-003 pins Node 20 LTS. Keep containers portable so the PaaS-vs-K8s decision stays
+# reversible (docs/IMPLEMENTATION-PLAN.md §3).
+ARG NODE_VERSION=20
+
+FROM node:${NODE_VERSION}-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+WORKDIR /repo
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
+COPY apps ./apps
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS build
+ARG APP
+RUN pnpm --filter "./apps/${APP}..." build
+
+FROM base AS runtime
+ARG APP
+ENV NODE_ENV=production
+# Do not run as root.
+USER node
+COPY --from=build --chown=node:node /repo /repo
+WORKDIR /repo/apps/${APP}
+EXPOSE 3001
+CMD ["node", "dist/main.js"]
