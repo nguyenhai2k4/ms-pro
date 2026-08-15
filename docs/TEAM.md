@@ -10,9 +10,9 @@ months of engineering to MVP plus a beta tail.
 
 ## Roster
 
-| Agent | Owns | Model | Why it's separate |
+| Agent | Owns | Default tier | Why it's separate |
 |---|---|---|---|
-| `tech-lead` | `docs/`, interface contracts, ADRs, phase decomposition | opus | Someone has to own coherence across packages and stop P2-scope creep |
+| `tech-lead` | `docs/`, interface contracts, ADRs, decomposition, **dispatch** | opus | Someone has to own coherence across packages and stop Phase-2 scope creep |
 | `scheduler-engineer` | `packages/cpm-engine`, scheduler compute path | opus | Highest-risk module; correctness-critical and algorithmically specialized |
 | `realtime-engineer` | Mutation queue, WebSocket hub, presence, Yjs | opus | Second-highest risk; distributed-systems reasoning, distinct from CRUD work |
 | `backend-engineer` | `apps/api`, `packages/db` | sonnet | High-volume, well-understood CRUD/RBAC/reporting surface |
@@ -20,9 +20,13 @@ months of engineering to MVP plus a beta tail.
 | `qa-engineer` | Tests across all packages | sonnet | The two risky subsystems fail silently; independent verification is the control |
 | `devops-engineer` | `infra/`, CI/CD, observability | sonnet | Scheduler affinity + perf instrumentation are real design work, not just scripts |
 
-Opus is assigned where the reasoning is hardest and mistakes are most expensive (scheduling
-correctness, distributed ordering, architecture). Sonnet handles the broader,
-better-specified surfaces.
+Defaults are starting points, not fixed assignments. Each dispatch carries an explicit model
+tier chosen per task under `docs/MODEL-ROUTING.md` — `backend-engineer` may run at haiku for
+mechanical boilerplate, `frontend-engineer` at opus for the Gantt adapter interface. What is
+*not* negotiable is the floors: FR-SCH, FR-RES-05/06, FR-COL-01..04, and interface/ADR work
+never route below opus regardless of how small the task looks.
+
+`tech-lead` holds the Agent tool and is the only agent that dispatches others.
 
 ## Ownership matrix
 
@@ -60,22 +64,34 @@ From the roadmap in `docs/IMPLEMENTATION-PLAN.md` §6:
 
 ## How to use the team
 
+Normal operation is to hand a phase to `tech-lead` and let it orchestrate:
+
 ```
-Use the tech-lead agent to decompose P0 into work items.
+Use the tech-lead agent to decompose and execute P0.
+```
+
+It runs the protocol in its agent definition: phase-entry checklist → land interface
+contracts in `packages/shared-types` → decompose into waves → dispatch each work item to the
+owning agent at an explicitly chosen model tier → verify acceptance → hand to `qa-engineer`.
+
+Direct dispatch is still fine for a single scoped piece of work:
+
+```
 Use the scheduler-engineer agent to implement the forward/backward pass (FR-SCH-04, FR-SCH-05).
 Use the qa-engineer agent to review whether P2 meets its acceptance criteria.
 ```
 
-Guidance for running them:
+Guidance:
 
-- **Start each phase with `tech-lead`** to land interface contracts in
-  `packages/shared-types` first. Parallel agents collide at exactly those seams, so defining
-  them upfront is what makes parallelism safe.
-- **Parallelize within a phase, serialize across the risky ones.** P2 and P3 are deliberately
+- **Contracts before parallelism.** Agents building against types that don't exist yet invent
+  incompatible ones; reconciling that costs more than the serialization it saved.
+- **Parallelize within a wave, serialize across the risky phases.** P2 and P3 are deliberately
   sequential — realtime is built against a stable engine, not a moving one.
-- **`qa-engineer` reviews, it doesn't rubber-stamp.** A phase with green tests and uncovered
-  `FR-*` IDs is not done.
-- Give each agent the `FR-*` IDs it's implementing. That's the shared vocabulary between the
+- **`qa-engineer` reviews, it doesn't rubber-stamp**, and it runs at a tier no lower than the
+  code under test. A phase with green tests and uncovered `FR-*` IDs is not done.
+- **Escalations are a success signal, not a failure.** An agent that stops on an ambiguous spec
+  saved a defect. Give it a decision; if the same item escalates twice, re-decompose it.
+- Give every agent the `FR-*` IDs it's implementing — that's the shared vocabulary between the
   FRS, the commits, and the tests.
 
 ## What this team does not cover

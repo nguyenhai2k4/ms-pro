@@ -9,6 +9,7 @@ Planning docs are the contract; read them before writing code.
 | `docs/FRS.md` | Numbered functional requirements (`FR-*`), use cases, data model |
 | `docs/IMPLEMENTATION-PLAN.md` | Architecture, ADR-001..005, roadmap phases P0-P8, risk register |
 | `docs/TEAM.md` | Who owns what — agent roster and ownership matrix |
+| `docs/MODEL-ROUTING.md` | Which model tier a task runs at, and the floors that can't be overridden |
 
 **Every PR/commit must cite the `FR-*` IDs it implements.** If work doesn't map to an
 `FR-*` ID, it is either out of scope or the FRS needs updating first — say so rather than
@@ -54,6 +55,9 @@ structure. Do not assume a build command exists — check `package.json` before 
    incremental <150ms, Gantt paint <1s @ 2k visible rows.
 6. **Accessibility is built in, not retrofitted.** The canvas Gantt ships with a synchronized
    accessible table representation from the start — this is in the risk register for a reason.
+7. **Escalate rather than guess.** An ambiguous spec, an ADR conflict, or a needed interface
+   change stops the work and goes to `tech-lead`. Guessing is the failure mode that model
+   routing exists to prevent (`docs/MODEL-ROUTING.md` guardrail 3).
 
 ## Conventions
 
