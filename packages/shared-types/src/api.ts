@@ -1,15 +1,40 @@
 import { z } from 'zod';
-import { calendarTemplateSchema, projectRoleSchema } from './enums.js';
-import { organizationSchema, projectSchema, userSchema } from './entities.js';
-import { isoDateTimeSchema, projectIdSchema, userIdSchema } from './primitives.js';
+import {
+  constraintTypeSchema,
+  calendarTemplateSchema,
+  projectRoleSchema,
+  scheduleModeSchema,
+  weekdaySchema,
+} from './enums.js';
+import {
+  calendarSchema,
+  calendarExceptionSchema,
+  organizationSchema,
+  projectSchema,
+  taskSchema,
+  userSchema,
+} from './entities.js';
+import { deleteTaskChildPolicySchema } from './intents.js';
+import {
+  calendarExceptionIdSchema,
+  calendarIdSchema,
+  durationHoursSchema,
+  isoDateSchema,
+  isoDateTimeSchema,
+  percentCompleteSchema,
+  prioritySchema,
+  projectIdSchema,
+  taskIdSchema,
+  userIdSchema,
+} from './primitives.js';
 
 /**
- * REST surface for P0: authentication (FR-AUTH) and the organization/project shell (FR-PRJ).
+ * REST surface for P0 (authentication, org/project shell) and P1 (task/WBS, calendars).
  *
- * Scope note: task, dependency, resource, calendar and reporting endpoints are **not** here.
- * They belong to P1 and later, and writing their DTOs now — before the entities they operate on
- * have been through an implementation — produces contracts that get rewritten rather than built
- * against. This file grows one phase at a time.
+ * Scope note: dependency, resource and reporting endpoints are **not** here. They belong to P2
+ * and later, and writing their DTOs now — before the entities they operate on have been through
+ * an implementation — produces contracts that get rewritten rather than built against. This file
+ * grows one phase at a time.
  */
 
 // --------------------------------------------------------------------------------------------
@@ -128,3 +153,124 @@ export const projectMemberViewSchema = z.object({
   acceptedAt: isoDateTimeSchema.nullable(),
 });
 export type ProjectMemberView = z.infer<typeof projectMemberViewSchema>;
+
+// --------------------------------------------------------------------------------------------
+// Task & WBS (FR-TSK-01..09). `projectId` travels in the URL, not the body, on every one of
+// these — REST convention here, and it means the intent-envelope's `projectId` (`intents.ts`)
+// always comes from a validated route param rather than a client-supplied body field.
+// --------------------------------------------------------------------------------------------
+
+/** FR-TSK-01, FR-TSK-02, FR-TSK-04. `parentId: null` creates a top-level task. */
+export const createTaskRequestSchema = z.object({
+  parentId: taskIdSchema.nullable(),
+  name: z.string().min(1).max(500),
+  durationHours: durationHoursSchema,
+  /** Only meaningful when `scheduleMode` is `manual`; the scheduler sets it otherwise. */
+  start: isoDateTimeSchema.nullable(),
+  isMilestone: z.boolean().default(false),
+  scheduleMode: scheduleModeSchema.default('auto'),
+  constraintType: constraintTypeSchema.default('ASAP'),
+  constraintDate: isoDateTimeSchema.nullable().default(null),
+  calendarId: calendarIdSchema.nullable().default(null),
+  priority: prioritySchema.default(500),
+});
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
+
+/**
+ * FR-TSK-01, FR-TSK-05, FR-TSK-06, FR-TSK-07, FR-TRK-04. Partial: only supplied fields change.
+ * The handler still enforces `CONTRIBUTOR_WRITABLE_TASK_FIELDS` (`rbac.ts`) against whichever
+ * keys are present before it becomes an `UpdateTaskIntent` — this DTO does not itself narrow by
+ * role, since the writable set depends on the caller, not the shape of a PATCH.
+ */
+export const updateTaskRequestSchema = z
+  .object({
+    name: z.string().min(1).max(500).optional(),
+    durationHours: durationHoursSchema.optional(),
+    start: isoDateTimeSchema.nullable().optional(),
+    isMilestone: z.boolean().optional(),
+    scheduleMode: scheduleModeSchema.optional(),
+    constraintType: constraintTypeSchema.optional(),
+    constraintDate: isoDateTimeSchema.nullable().optional(),
+    calendarId: calendarIdSchema.nullable().optional(),
+    priority: prioritySchema.optional(),
+    pctComplete: percentCompleteSchema.optional(),
+    actualStart: isoDateTimeSchema.nullable().optional(),
+    actualFinish: isoDateTimeSchema.nullable().optional(),
+    notes: z.string().optional(),
+    status: z.enum(['not_started', 'in_progress', 'blocked', 'done']).optional(),
+  })
+  .refine((body) => Object.keys(body).length > 0, { message: 'no fields to update' });
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>;
+
+/** FR-TSK-02: move a task to a new parent (or to top level) and/or position among siblings. */
+export const reparentTaskRequestSchema = z.object({
+  newParentId: taskIdSchema.nullable(),
+  newIndex: z.number().int().nonnegative().optional(),
+});
+export type ReparentTaskRequest = z.infer<typeof reparentTaskRequestSchema>;
+
+/**
+ * FR-TSK-08: required (`validationFailed`) when the task has children; rejected with `conflict`
+ * when supplied for a childless task, so the two error paths in the requirement's "explicit
+ * confirmation" language are distinguishable by the client without inspecting the task first.
+ */
+export const deleteTaskRequestSchema = z.object({
+  childPolicy: deleteTaskChildPolicySchema.optional(),
+});
+export type DeleteTaskRequest = z.infer<typeof deleteTaskRequestSchema>;
+
+export const taskResponseSchema = z.object({ task: taskSchema });
+export type TaskResponse = z.infer<typeof taskResponseSchema>;
+
+/** FR-TSK-02, FR-VIEW-03: the full project tree, flat with `parentId`; the client builds hierarchy. */
+export const taskListResponseSchema = z.object({ tasks: z.array(taskSchema) });
+export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
+
+// --------------------------------------------------------------------------------------------
+// Calendars (FR-CAL-01..04)
+// --------------------------------------------------------------------------------------------
+
+/** FR-CAL-03: an additional named calendar in the project (e.g. one resource's PTO calendar). */
+export const createCalendarRequestSchema = z.object({
+  name: z.string().min(1).max(200),
+  workingDays: z.array(weekdaySchema).min(1),
+  workingHoursStartMinute: z.number().int().min(0).max(1440),
+  workingHoursEndMinute: z.number().int().min(0).max(1440),
+});
+export type CreateCalendarRequest = z.infer<typeof createCalendarRequestSchema>;
+
+/**
+ * FR-CAL-01: editing the project's own calendar (working days/hours) goes through this endpoint
+ * too — it is the same entity, not a special case. Swapping which calendar is the project
+ * *default* is a `project:update` (`startDate`/`calendarId` on `Project`), not a field here.
+ */
+export const updateCalendarRequestSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    workingDays: z.array(weekdaySchema).min(1).optional(),
+    workingHoursStartMinute: z.number().int().min(0).max(1440).optional(),
+    workingHoursEndMinute: z.number().int().min(0).max(1440).optional(),
+  })
+  .refine((body) => Object.keys(body).length > 0, { message: 'no fields to update' });
+export type UpdateCalendarRequest = z.infer<typeof updateCalendarRequestSchema>;
+
+/** FR-CAL-02: a single date's override; `isWorking: false` is a holiday, `true` with hours is a half-day. */
+export const createCalendarExceptionRequestSchema = z.object({
+  date: isoDateSchema,
+  isWorking: z.boolean(),
+  workingHoursStartMinuteOverride: z.number().int().min(0).max(1440).nullable().default(null),
+  workingHoursEndMinuteOverride: z.number().int().min(0).max(1440).nullable().default(null),
+});
+export type CreateCalendarExceptionRequest = z.infer<typeof createCalendarExceptionRequestSchema>;
+
+export const calendarExceptionIdParamSchema = z.object({ exceptionId: calendarExceptionIdSchema });
+
+export const calendarResponseSchema = z.object({
+  calendar: calendarSchema,
+  exceptions: z.array(calendarExceptionSchema),
+});
+export type CalendarResponse = z.infer<typeof calendarResponseSchema>;
+
+/** FR-CAL-03: every calendar in the project, including the default and any resource/task overrides. */
+export const calendarListResponseSchema = z.object({ calendars: z.array(calendarSchema) });
+export type CalendarListResponse = z.infer<typeof calendarListResponseSchema>;
