@@ -1,6 +1,13 @@
 # Functional Requirements Specification: ProjectApp
-**Version:** 1.0 | **Status:** Draft for review | **Derived from:** PRD v0.1 (`docs/PRD.md`)
-**Author:** Claude (analysis) | **Date:** 2026-08-14
+**Version:** 1.1 | **Status:** Draft for review | **Derived from:** PRD v0.1 (`docs/PRD.md`)
+**Author:** Claude (analysis) | **Date:** 2026-08-14 | **Amended:** 2026-08-15
+
+> **v1.1 amendment (P0 phase entry).** §3.11 (`FR-AUTH-*`) and §3.12 (`FR-PRJ-*`) were added
+> because P0's two largest deliverables — authentication and the org/project shell — had no
+> requirement IDs to cite, while `CLAUDE.md` requires every commit to cite one. No new scope
+> was introduced: every added requirement restates behaviour already present in UC-1, UC-10,
+> §5.1, the data model in §6, or the auth row of `docs/IMPLEMENTATION-PLAN.md` §3. Where an
+> added requirement overlaps an existing one it cross-references rather than restates it.
 
 This FRS translates the PRD into testable, numbered requirements, concrete use cases, and
 persona-level user journeys. Companion document `docs/IMPLEMENTATION-PLAN.md` covers
@@ -167,6 +174,38 @@ to test cases and PRs. "MVP" = must ship in Phase 1; "P2" = Phase 2 per PRD scop
 |---|---|---|
 | FR-IMP-01 | The system shall support importing tasks from CSV/XLSX (name, duration, dates, predecessor references) with a column-mapping step. | MVP |
 | FR-IMP-02 | Import of native MS Project `.mpp` files is **not** MVP (see ADR-004 in implementation plan for rationale); `.xml` (MS Project XML interchange format) import is a candidate for a fast-follow immediately after MVP given materially lower parsing complexity than binary `.mpp`. | P2 (fast-follow) |
+
+### 3.11 Authentication & Identity (FR-AUTH) — *added v1.1*
+
+Sources: `docs/IMPLEMENTATION-PLAN.md` §3 (auth row), §5.1 step 1, UC-1 precondition
+("authenticated user"), UC-10, and the `User`/`Organization` entities in §6.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| FR-AUTH-01 | The system shall support email/password registration and login, with passwords stored only as a salted one-way hash (never reversible, never logged). | MVP |
+| FR-AUTH-02 | The system shall support OAuth social login with Google and Microsoft accounts via a managed auth provider; a `User` record shall record which `auth_provider` established the identity. | MVP |
+| FR-AUTH-03 | An authenticated session shall be represented by a bearer credential with a bounded lifetime; logout shall invalidate the session server-side, not merely discard it client-side. | MVP |
+| FR-AUTH-04 | Every request to a non-public endpoint shall resolve to exactly one `User` and that user's `Organization`; requests referencing an entity outside the caller's organization shall be rejected as not-found (not as forbidden, to avoid leaking existence). | MVP |
+| FR-AUTH-05 | The system shall provide self-serve password reset via a single-use, time-limited emailed token. | MVP |
+| FR-AUTH-06 | Authorization shall be re-evaluated per request from stored membership state, never from a role embedded in a credential issued at login (this is what makes UC-10's "immediate effect on the invitee's live session" true). Enforcement rules themselves are specified in FR-ACL. | MVP |
+| FR-AUTH-07 | SSO/SAML is out of scope for MVP — see FR-ACL-06. | P2 |
+
+### 3.12 Organization & Project Shell (FR-PRJ) — *added v1.1*
+
+Sources: UC-1, UC-10, §5.1 steps 1-2 and 5, PRD §5.2 / FRS §6 (`Organization`, `Project`,
+`ProjectMember`). These are the CRUD and shell behaviours the rest of the FRS assumes exist
+but never numbered.
+
+| ID | Requirement | Priority |
+|---|---|---|
+| FR-PRJ-01 | On first registration the system shall create an `Organization` and make the registering user its first member; MVP assumes one organization per user (cross-organization membership and portfolio rollup are out of scope — see FR-RES-08). | MVP |
+| FR-PRJ-02 | An authenticated user shall be able to create a `Project` with a name and start date, selecting a calendar template (FR-CAL-04); the creator shall be recorded as `ProjectMember` with role `admin` (UC-1). | MVP |
+| FR-PRJ-03 | The system shall list the projects the calling user is a `ProjectMember` of, each with that user's role; projects the user is not a member of shall not appear. | MVP |
+| FR-PRJ-04 | Project name, start date, default calendar, and `status_date` shall be editable by Admins only (see FR-ACL-03). | MVP |
+| FR-PRJ-05 | Project deletion shall be Admin-only, shall require explicit confirmation naming the project, and shall be recorded in the audit log (FR-COL-07). | MVP |
+| FR-PRJ-06 | An Admin shall be able to invite a user to a project by email address with an assigned role, and to change or revoke that role later; invitations record `invited_at` and `accepted_at` (UC-10). | MVP |
+| FR-PRJ-07 | A newly created project with no tasks shall present an actionable empty state offering: add first task, or import from CSV/XLSX (FR-IMP-01) — not a blank screen. | MVP |
+| FR-PRJ-08 | Duplicate project names within an organization shall be permitted; project identity is the `id`, not the name (UC-1 error flow). | MVP |
 
 ---
 
@@ -346,7 +385,10 @@ every recalculation — see the CPM engine design in the implementation plan.
 ## 8. Traceability to PRD Scope
 
 Every MVP requirement above maps to PRD §3 (Scope — MVP); every P2-tagged requirement maps
-to PRD §4 (Scope — Phase 2). No requirement was invented outside the PRD's stated scope;
+to PRD §4 (Scope — Phase 2). The v1.1 additions (`FR-AUTH-*`, `FR-PRJ-*`) map to PRD §3's
+assumption of authenticated multi-user projects and to the auth/hosting row of
+`docs/IMPLEMENTATION-PLAN.md` §3; they number behaviour the PRD already implied rather than
+adding scope. No requirement was invented outside the PRD's stated scope;
 this document only makes the PRD's prose testable and resolves the PRD's open questions
 (§9) with explicit engineering recommendations — see `docs/IMPLEMENTATION-PLAN.md` §2 (ADRs)
 for the reasoning behind each resolution.

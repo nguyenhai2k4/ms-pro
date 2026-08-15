@@ -59,6 +59,12 @@ later.
 
 ## 2. Architecture Decision Records (resolving the PRD's open questions)
 
+> ADR-001..005 below resolve the PRD's open questions and are recorded inline. **ADR-006 onward
+> live as individual files in `docs/adr/`** — they record decisions made during implementation,
+> which arrive at a different cadence than the planning ADRs and need their own supersession
+> history. Current: `ADR-006` (P0 — Gantt adapter contract lands now, vendor integration gated
+> behind licensing; extends ADR-001).
+
 ### ADR-001: Buy vs. build the Gantt renderer → **Buy for MVP (license Bryntum or DHTMLX), plan an exit ramp**
 - **Context:** PRD explicitly flags this tradeoff (§9). A canvas/WebGL Gantt with
   virtualization, drag-resize, dependency-line drawing, and accessibility support is,

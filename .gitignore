@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment / secrets — never commit real values (CLAUDE.md: secrets are env vars only)
+.env
+.env.*
+!.env.example
+
+# Local tooling
+.DS_Store
+*.log
+.vite/
+.turbo/
+playwright-report/
+test-results/
