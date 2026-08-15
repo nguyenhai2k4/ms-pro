@@ -239,6 +239,7 @@ assume **Scenario B staffing** (§5).
 | Phase | Scope | Duration | Rationale for placement |
 |---|---|---|---|
 | **P0 — Foundations** | Auth, org/project shell, CI/CD, DB schema, Gantt/Grid library integration (ADR-001), empty-state UI | 2 wks | Nothing else can start without this |
+| ↳ *P0 status (2026-08-15)* | Landed: workspace/CI/dev stack, `packages/shared-types` contracts, DB schema + migrations, API (auth, project shell, RBAC, audit), web shell + Gantt adapter contract + accessible table. **Outstanding: Gantt vendor integration (ADR-006 — FR-VIEW-01/02 unmet, gated before P1 exit), FR-AUTH-02 OAuth, email delivery.** | — | Vendor licensing is now on the P1 critical path |
 | **P1 — Task/WBS core** | Task CRUD, WBS hierarchy + rollup, milestones, calendars | 2 wks | |
 | **P2 — Scheduling engine** | Dependencies (FS/SS/FF/SF + lag), CPM forward/backward pass, incremental recalc, cycle detection, constraints, critical path in Gantt | 4 wks | Highest-risk module — proven in isolation before realtime is layered on |
 | **P3 — Real-time collaboration** | Mutation queue, WebSocket hub, presence, Yjs text sync, conflict/last-write-wins UX | 4 wks | Second highest-risk module; validated against the now-stable scheduling engine from P2 rather than against a moving target |
