@@ -20,3 +20,6 @@ coverage/
 .turbo/
 playwright-report/
 test-results/
+
+# Agent-managed worktrees (not project source)
+.claude/worktrees/

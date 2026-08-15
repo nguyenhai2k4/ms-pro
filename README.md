@@ -55,21 +55,25 @@ pnpm -r typecheck && pnpm -r lint && pnpm format && pnpm -r test
 
 ## Status
 
-**P0 (Foundations) — largely landed; two items outstanding.** See
+**P0 (Foundations) — landed. P1 (Task/WBS core) — in progress.** See
 [`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) §6.
 
-Landed: pnpm workspace and toolchain, CI, local dev stack, the interface contracts in
+P0 landed: pnpm workspace and toolchain, CI, local dev stack, the interface contracts in
 `packages/shared-types`, the database schema and migration runner, the API (auth, org/project
 shell, RBAC, audit log), and the web shell with the Gantt adapter contract and its accessible
 table representation.
 
 Outstanding and tracked, not silently dropped:
 
-- **Gantt vendor integration** ([`docs/adr/ADR-006`](docs/adr/ADR-006-gantt-adapter-contract-and-placeholder.md)) —
-  no license and no vendor registry access, so a development-only placeholder sits behind the
-  adapter contract. **FR-VIEW-01 and FR-VIEW-02 are not satisfied.** Gated before P1 exit.
+- **Gantt renderer** ([`docs/adr/ADR-009`](docs/adr/ADR-009-gantt-open-source-fallback.md)) —
+  no commercial license; the decision is now to fork and harden `frappe-gantt` behind the
+  ADR-006 adapter contract rather than buy (supersedes ADR-008). A development-only placeholder
+  sits behind that contract until the fork lands. **FR-VIEW-01 and FR-VIEW-02 are not
+  satisfied.** Budgeted at 6-8 weeks per ADR-001/ADR-009, tracked as its own work item rather
+  than inside P1's Task/WBS budget.
 - **FR-AUTH-02** (Google/Microsoft OAuth) — the managed provider is not configured; password
   auth only.
 - **Email delivery** — password-reset tokens are minted and consumed correctly but not sent.
 
-P1 (Task/WBS core) is next.
+P1 entry landed the mutation-intent envelope (ADR-007) and task/calendar REST contracts;
+Task/WBS CRUD + rollup and calendar CRUD are in progress.

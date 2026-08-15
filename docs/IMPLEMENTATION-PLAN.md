@@ -62,8 +62,8 @@ later.
 > ADR-001..005 below resolve the PRD's open questions and are recorded inline. **ADR-006 onward
 > live as individual files in `docs/adr/`** — they record decisions made during implementation,
 > which arrive at a different cadence than the planning ADRs and need their own supersession
-> history. Current: `ADR-006` (P0 — Gantt adapter contract lands now, vendor integration gated
-> behind licensing; extends ADR-001).
+> history. Current: `ADR-009` (P1 — takes ADR-001's open-source Gantt fallback, superseding
+> ADR-008's buy decision; `ADR-006`'s adapter contract is unchanged, only what implements it).
 
 ### ADR-001: Buy vs. build the Gantt renderer → **Buy for MVP (license Bryntum or DHTMLX), plan an exit ramp**
 - **Context:** PRD explicitly flags this tradeoff (§9). A canvas/WebGL Gantt with
@@ -239,8 +239,9 @@ assume **Scenario B staffing** (§5).
 | Phase | Scope | Duration | Rationale for placement |
 |---|---|---|---|
 | **P0 — Foundations** | Auth, org/project shell, CI/CD, DB schema, Gantt/Grid library integration (ADR-001), empty-state UI | 2 wks | Nothing else can start without this |
-| ↳ *P0 status (2026-08-15)* | Landed: workspace/CI/dev stack, `packages/shared-types` contracts, DB schema + migrations, API (auth, project shell, RBAC, audit), web shell + Gantt adapter contract + accessible table. **Outstanding: Gantt vendor integration (ADR-006 — FR-VIEW-01/02 unmet, gated before P1 exit), FR-AUTH-02 OAuth, email delivery.** | — | Vendor licensing is now on the P1 critical path |
+| ↳ *P0 status (2026-08-15)* | Landed: workspace/CI/dev stack, `packages/shared-types` contracts, DB schema + migrations, API (auth, project shell, RBAC, audit), web shell + Gantt adapter contract + accessible table. **Outstanding: Gantt renderer (ADR-009 — FR-VIEW-01/02 unmet, tracked as its own ~6-8 wk item, not a P1-exit blocker for Task/WBS), FR-AUTH-02 OAuth, email delivery.** | — | Open-source Gantt fork runs alongside P1, not gating it (ADR-009) |
 | **P1 — Task/WBS core** | Task CRUD, WBS hierarchy + rollup, milestones, calendars | 2 wks | |
+| ↳ *P1 status (2026-08-15)* | Entry: mutation-intent envelope (ADR-007) and task/calendar REST contracts landed. In progress: Task/WBS CRUD + in-process rollup scheduler, calendar CRUD (`apps/api`); Task/WBS grid and calendar UI (`apps/web`) next. | — | ADR-007 resolved the queue question: no ADR-002 queue needed until P3 |
 | **P2 — Scheduling engine** | Dependencies (FS/SS/FF/SF + lag), CPM forward/backward pass, incremental recalc, cycle detection, constraints, critical path in Gantt | 4 wks | Highest-risk module — proven in isolation before realtime is layered on |
 | **P3 — Real-time collaboration** | Mutation queue, WebSocket hub, presence, Yjs text sync, conflict/last-write-wins UX | 4 wks | Second highest-risk module; validated against the now-stable scheduling engine from P2 rather than against a moving target |
 | **P4 — Resources & cost** | Resource types, assignments, cost calc, overallocation detection, basic leveling | 3 wks | Depends on stable scheduling engine (P2) |
