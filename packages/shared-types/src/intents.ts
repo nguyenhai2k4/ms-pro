@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { constraintTypeSchema, scheduleModeSchema } from './enums.js';
+import { constraintTypeSchema, scheduleModeSchema, taskStatusSchema } from './enums.js';
 import {
   calendarIdSchema,
   durationHoursSchema,
@@ -75,6 +75,7 @@ export const updateTaskIntentSchema = baseTaskFieldsSchema
     actualStart: isoDateTimeSchema.nullable().optional(),
     actualFinish: isoDateTimeSchema.nullable().optional(),
     notes: z.string().optional(),
+    status: taskStatusSchema.optional(),
   })
   .strict();
 export type UpdateTaskIntent = z.infer<typeof updateTaskIntentSchema>;

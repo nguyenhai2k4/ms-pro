@@ -874,21 +874,35 @@ describe('FR-ACL: RBAC on every task mutation', () => {
 });
 
 // ------------------------------------------------------------------------------------------------
-// Contract gap (escalated): `status` is in the REST DTO but not in the intent envelope.
+// `status` (FR-VIEW-06's Kanban column key, but a plain task attribute independent of scheduling)
+// travels through updateTaskIntentSchema alongside notes/actualStart/actualFinish — resolved by
+// tech-lead: it is not schedule-affecting, so it rides the single write path for the same reason
+// those fields do (one path, one audit choke point), not because Kanban itself is in scope here.
 // ------------------------------------------------------------------------------------------------
 
-describe('updateTaskRequestSchema.status has no field on updateTaskIntentSchema', () => {
-  it('refuses the field rather than accepting a PATCH that silently discards it', async () => {
+describe('FR-TSK-01: status is a plain writable field, independent of scheduling', () => {
+  it('accepts a status update and persists it', async () => {
     const dana = await register('Dana', 'dana@acme.test');
     const projectId = await createProject(dana.token);
     const task = await createTask(dana.token, projectId);
 
     const response = await patch(dana.token, projectId, task.id, { status: 'in_progress' });
-    expect(response.statusCode).toBe(422);
+    expect(response.statusCode, response.body).toBe(200);
 
     const { rows } = await exec.query<{ status: string }>(`SELECT status FROM task WHERE id = $1`, [
       task.id,
     ]);
-    expect(rows[0]!.status).toBe('not_started');
+    expect(rows[0]!.status).toBe('in_progress');
+  });
+
+  it('does not require children to be absent — status is never rollup-derived', async () => {
+    const dana = await register('Dana', 'dana@acme.test');
+    const projectId = await createProject(dana.token);
+    const parent = await createTask(dana.token, projectId);
+    await createTask(dana.token, projectId, { parentId: parent.id, name: 'child' });
+
+    const response = await patch(dana.token, projectId, parent.id, { status: 'blocked' });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().task.status).toBe('blocked');
   });
 });

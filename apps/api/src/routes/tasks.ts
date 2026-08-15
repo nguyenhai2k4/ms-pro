@@ -62,17 +62,6 @@ const auditRecordsFor = (changes: readonly TaskChange[]): AuditRecord[] =>
     };
   });
 
-/**
- * `status` is accepted by `updateTaskRequestSchema` but has no field on `updateTaskIntentSchema`,
- * which is `.strict()`. There is no way to carry it through the single write path invariant 2
- * requires, so it is refused rather than silently dropped — a PATCH that returns 200 and discards
- * a field is the worse failure. Task status belongs to the Kanban board (FR-VIEW-06), a later
- * phase than FR-TSK-01's field list; the mismatch between the two contracts is escalated to
- * `tech-lead` rather than papered over by widening the intent here (`packages/shared-types` is
- * tier-O, tech-lead-owned).
- */
-const STATUS_NOT_IN_INTENT = 'status is not writable in P1: FR-VIEW-06 (Kanban) is a later phase';
-
 export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
   const { exec, now } = deps;
 
@@ -163,13 +152,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
       assertFieldsWritable(role, Object.keys(body));
       assertAssignedRowLevel(role);
 
-      if (Object.prototype.hasOwnProperty.call(body, 'status')) {
-        throw validationFailed({ fieldErrors: { status: [STATUS_NOT_IN_INTENT] } });
-      }
-
       const envelope = buildEnvelope(
-        // `status` is refused above, so what is left is exactly `updateTaskIntentSchema`'s field
-        // set — the `.strict()` parse in `buildEnvelope` fails loudly if that ever stops being true.
         { kind: 'updateTask', taskId, ...body },
         projectId,
         user.userId,

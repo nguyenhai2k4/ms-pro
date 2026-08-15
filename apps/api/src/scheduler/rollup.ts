@@ -597,20 +597,27 @@ async function applyUpdate(
   const children = await loadChildren(exec, projectId, row.id);
   const has = (field: string): boolean => Object.prototype.hasOwnProperty.call(intent, field);
 
-  // FR-TSK-03 / FR-TRK-04: a parent's % complete is derived from its children, so a direct edit
-  // would be overwritten by the next change to any of them. Refusing the write is better than
-  // accepting one that silently does not stick. FR-TRK-04's "manual override at the parent level"
-  // is the sanctioned way to do this and is out of scope for P1 — see `rollupFromChildren`.
-  if (has('pctComplete') && children.length > 0) {
+  // FR-TSK-03 / FR-TRK-04: a summary task's start/finish/duration/% complete are all derived from
+  // its children, so a direct edit to any of them would be overwritten by `recomputeChain` before
+  // this same request's response is built. The overwrite is not a data-integrity problem — the
+  // response the caller gets back is always the correct rolled-up value — but returning 200 with a
+  // body that silently doesn't match what was PATCHed is a worse failure than refusing the write
+  // outright and saying why. FR-TRK-04's "manual override at the parent level" is the sanctioned
+  // way to do this for % complete and is out of scope for P1 — see `rollupFromChildren`.
+  const rollupOwnedFields = (['start', 'durationHours', 'pctComplete'] as const).filter((field) =>
+    has(field),
+  );
+  if (rollupOwnedFields.length > 0 && children.length > 0) {
     throw validationFailed(
       {
-        fieldErrors: {
-          pctComplete: [
-            'FR-TSK-03: a summary task rolls % complete up from its children; edit a leaf instead',
-          ],
-        },
+        fieldErrors: Object.fromEntries(
+          rollupOwnedFields.map((field) => [
+            field,
+            [`FR-TSK-03: a summary task rolls ${field} up from its children; edit a leaf instead`],
+          ]),
+        ),
       },
-      'A summary task rolls its % complete up from its children',
+      'A summary task rolls this field up from its children',
     );
   }
   if (intent.isMilestone === true && children.length > 0) {
@@ -635,6 +642,7 @@ async function applyUpdate(
     actualStart: has('actualStart') ? intent.actualStart! : before.actualStart,
     actualFinish: has('actualFinish') ? intent.actualFinish! : before.actualFinish,
     notes: intent.notes ?? before.notes,
+    status: intent.status ?? before.status,
     updatedAt: envelope.issuedAt,
     updatedBy: envelope.actorUserId,
   };
@@ -649,7 +657,7 @@ async function applyUpdate(
         SET name = $2, duration_hours = $3, start = $4, finish = $5, pct_complete = $6,
             is_milestone = $7, schedule_mode = $8, constraint_type = $9, constraint_date = $10,
             calendar_id = $11, priority = $12, actual_start = $13, actual_finish = $14,
-            notes = $15, updated_at = $16, updated_by = $17
+            notes = $15, status = $16, updated_at = $17, updated_by = $18
       WHERE id = $1
       RETURNING ${TASK_SELECT}`,
     [
@@ -668,6 +676,7 @@ async function applyUpdate(
       merged.actualStart,
       merged.actualFinish,
       merged.notes,
+      merged.status,
       merged.updatedAt,
       merged.updatedBy,
     ],
