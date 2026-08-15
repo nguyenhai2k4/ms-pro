@@ -99,35 +99,31 @@ class StubGanttAdapter implements GanttAdapter {
 
 describe('invariant 6: the accessibility guarantee belongs to GanttView, not to the adapter', () => {
   /**
-   * DEFECT (P0, open — accessibility). `GanttView` renders the chart container and the accessible
-   * table together, but the `aria-hidden="true"` that stops a screen reader announcing the same
-   * schedule twice is set by `PlaceholderGanttAdapter.mount()`, not by `GanttView`. The
-   * `GanttAdapter` contract in `packages/shared-types/src/gantt.ts` does not require an
-   * implementation to set it.
+   * Was a P0 defect, now fixed and kept as the regression guard.
    *
-   * So the WCAG guarantee is delegated to the one component ADR-006 says will be replaced. On the
-   * day the vendor adapter lands, this regresses silently unless that adapter remembers — and the
-   * existing test ("hides the drawing surface from assistive technology") will keep passing right
-   * up until the swap, because it uses the placeholder.
+   * `aria-hidden="true"` — the thing that stops a screen reader announcing the same schedule
+   * twice — used to be set by `PlaceholderGanttAdapter.mount()` rather than by `GanttView`, and
+   * the `GanttAdapter` contract does not require an implementation to set it. That delegated the
+   * WCAG guarantee to the one component ADR-006 says will be replaced, so it would have
+   * regressed silently on the day the vendor adapter landed. The older test could not catch it
+   * because it exercises the placeholder, which does set the attribute.
    *
-   * Minimal reproduction: render `<GanttView>` with any adapter that does not set the attribute.
-   * Fix is one line in `GanttView.tsx` — put `aria-hidden="true"` on the container it owns.
+   * `GanttView` now sets it on the container it owns, so the guarantee survives the vendor swap
+   * structurally. This test uses a deliberately non-conforming stub adapter — keep it that way;
+   * testing this against the placeholder is precisely the weakness that let the gap through.
    */
-  it.fails(
-    'KNOWN DEFECT: the drawing surface is hidden regardless of which adapter is used',
-    () => {
-      const adapter = new StubGanttAdapter();
-      const { container } = render(
-        <GanttView model={model} zoom="week" adapterFactory={() => adapter} />,
-      );
+  it('hides the drawing surface regardless of which adapter is mounted', () => {
+    const adapter = new StubGanttAdapter();
+    const { container } = render(
+      <GanttView model={model} zoom="week" adapterFactory={() => adapter} />,
+    );
 
-      const canvas = container.querySelector('.gantt-view__canvas');
-      expect(
-        canvas?.getAttribute('aria-hidden'),
-        'a screen reader will announce the schedule twice if the chart surface is exposed',
-      ).toBe('true');
-    },
-  );
+    const canvas = container.querySelector('.gantt-view__canvas');
+    expect(
+      canvas?.getAttribute('aria-hidden'),
+      'a screen reader will announce the schedule twice if the chart surface is exposed',
+    ).toBe('true');
+  });
 
   it('renders the accessible table even when the adapter draws nothing at all', () => {
     const adapter = new StubGanttAdapter();

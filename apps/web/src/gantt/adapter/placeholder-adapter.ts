@@ -53,8 +53,11 @@ export class PlaceholderGanttAdapter implements GanttAdapter {
     this.#options = options;
     this.#zoom = options.initialZoom;
     container.setAttribute('data-gantt-adapter', 'placeholder');
-    // The canvas surface is decorative to assistive technology: the accessible table alongside it
-    // carries the same data (invariant 6). Hiding it here is correct, not a shortcut.
+    // NOTE: `GanttView` (apps/web/src/gantt/GanttView.tsx) now sets `aria-hidden="true"` on this
+    // same container itself, structurally, for every adapter — that is the fix for the defect
+    // where this guarantee used to live only here. This line is therefore redundant when mounted
+    // through `GanttView`, but is kept so the placeholder is still correct on its own (e.g. tests
+    // and any future direct use) and does not regress if `GanttView`'s copy is ever removed.
     container.setAttribute('aria-hidden', 'true');
     this.#paint();
   }

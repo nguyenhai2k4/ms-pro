@@ -26,7 +26,19 @@ mechanical boilerplate, `frontend-engineer` at opus for the Gantt adapter interf
 *not* negotiable is the floors: FR-SCH, FR-RES-05/06, FR-COL-01..04, and interface/ADR work
 never route below opus regardless of how small the task looks.
 
-`tech-lead` holds the Agent tool and is the only agent that dispatches others.
+**Dispatch is the session's job, not `tech-lead`'s.** Subagents cannot invoke other subagents
+here, so `tech-lead` decomposes, routes, and verifies, and the session executes the plan.
+
+This was learned the hard way in P0. `tech-lead` was given the Agent tool, found it unavailable
+at runtime, and executed all nine work items itself. It reported the substitution rather than
+hiding it — but the phase still ended with no independent implementer and no independent
+review, which is exactly what routing guardrail 5 exists to prevent, and the subsequent QA pass
+found three defects in it including a production-unsound transaction layer. Its agent
+definition now tells it to stop rather than absorb the work.
+
+Session-side dispatch has turned out better anyway: routing decisions happen where the user can
+see and interrupt them, and one process owns git — which matters, because parallel agents
+committing in the same worktree collide on the index.
 
 ## Ownership matrix
 

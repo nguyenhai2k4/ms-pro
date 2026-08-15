@@ -10,6 +10,14 @@ import { buildAccessibleRows } from './accessible/build-accessible-rows.js';
  * to add a Gantt to this app without also getting the accessible table, which is what invariant 6
  * ("built in, not retrofitted") means in practice. The canvas surface carries `aria-hidden` and
  * the table carries the semantics.
+ *
+ * `GanttView` — not the adapter — sets `aria-hidden="true"` on the container it owns, on the
+ * container element itself (below), before any adapter ever touches it. This is deliberate: the
+ * `GanttAdapter` contract (`packages/shared-types/src/gantt.ts`) does not, and should not, require
+ * an implementation to hide itself from assistive technology, because a conforming adapter that
+ * forgets to would silently reopen the "announced twice" defect the day the vendor adapter lands
+ * (ADR-006). Putting it here means the guarantee survives the vendor swap structurally, not by an
+ * implementer remembering to copy a line from the placeholder.
  */
 export interface GanttViewProps {
   readonly model: GanttViewModel;
@@ -45,6 +53,14 @@ export function GanttView({
         },
         onSelectionChange: (taskIds) => onSelectionChange?.(taskIds),
         onViewportChange: () => {},
+        // P1 SEAM (not fixed here, flagged for whoever wires collapse): this is a no-op, and
+        // collapse/expand state currently lives only inside the adapter (`GanttTaskView.isCollapsed`
+        // on the model the adapter was last given). The accessible table's `aria-expanded` is
+        // derived from that same `isCollapsed` field via `buildAccessibleRows`, so once a real
+        // toggle is wired here it MUST cause a new `GanttViewModel` (with updated `isCollapsed`) to
+        // flow back into `GanttView`'s `model` prop — not just tell the adapter to re-paint itself.
+        // Otherwise the canvas and the accessible table will disagree about which rows are expanded,
+        // and `aria-expanded` goes stale relative to what's visibly drawn.
         onToggleCollapse: () => {},
       },
     });
@@ -67,7 +83,13 @@ export function GanttView({
 
   return (
     <div className="gantt-view">
-      <div ref={containerRef} className="gantt-view__canvas" />
+      {/*
+        `aria-hidden` lives on this element, set by `GanttView`, not by whichever adapter is
+        mounted into it. A screen reader must never announce the schedule from both the canvas and
+        the table below; the table is the semantic source, so the canvas is unconditionally hidden
+        regardless of what the mounted `GanttAdapter` implementation does or doesn't set itself.
+      */}
+      <div ref={containerRef} className="gantt-view__canvas" aria-hidden="true" />
 
       {/*
         FR-VIEW-03 / WCAG 2.1 AA. This is a real table, not a visually-hidden afterthought: it is
