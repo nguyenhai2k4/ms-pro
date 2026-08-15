@@ -265,6 +265,9 @@ export type CreateCalendarExceptionRequest = z.infer<typeof createCalendarExcept
 
 export const calendarExceptionIdParamSchema = z.object({ exceptionId: calendarExceptionIdSchema });
 
+export const calendarExceptionResponseSchema = z.object({ exception: calendarExceptionSchema });
+export type CalendarExceptionResponse = z.infer<typeof calendarExceptionResponseSchema>;
+
 export const calendarResponseSchema = z.object({
   calendar: calendarSchema,
   exceptions: z.array(calendarExceptionSchema),

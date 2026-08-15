@@ -1,11 +1,23 @@
 import type {
   ApiError,
+  CalendarExceptionResponse,
+  CalendarListResponse,
+  CalendarResponse,
+  CreateCalendarExceptionRequest,
+  CreateCalendarRequest,
   CreateProjectRequest,
+  CreateTaskRequest,
   CurrentUserResponse,
+  DeleteTaskRequest,
   LoginRequest,
   ProjectSummary,
   RegisterRequest,
+  ReparentTaskRequest,
   Session,
+  TaskListResponse,
+  TaskResponse,
+  UpdateCalendarRequest,
+  UpdateTaskRequest,
 } from '@projectapp/shared-types';
 
 /**
@@ -67,6 +79,66 @@ export function createApiClient(options: ApiClientOptions) {
       request<ProjectSummary>('POST', '/projects', body),
     getProject: (projectId: string) =>
       request<ProjectSummary>('GET', `/projects/${encodeURIComponent(projectId)}`),
+
+    // FR-TSK-01..09
+    listTasks: (projectId: string) =>
+      request<TaskListResponse>('GET', `/projects/${encodeURIComponent(projectId)}/tasks`),
+    createTask: (projectId: string, body: CreateTaskRequest) =>
+      request<TaskResponse>('POST', `/projects/${encodeURIComponent(projectId)}/tasks`, body),
+    updateTask: (projectId: string, taskId: string, body: UpdateTaskRequest) =>
+      request<TaskResponse>(
+        'PATCH',
+        `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`,
+        body,
+      ),
+    reparentTask: (projectId: string, taskId: string, body: ReparentTaskRequest) =>
+      request<TaskResponse>(
+        'POST',
+        `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/reparent`,
+        body,
+      ),
+    deleteTask: (projectId: string, taskId: string, body?: DeleteTaskRequest) =>
+      request<void>(
+        'DELETE',
+        `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`,
+        body,
+      ),
+
+    // FR-CAL-01..04
+    listCalendars: (projectId: string) =>
+      request<CalendarListResponse>('GET', `/projects/${encodeURIComponent(projectId)}/calendars`),
+    getCalendar: (projectId: string, calendarId: string) =>
+      request<CalendarResponse>(
+        'GET',
+        `/projects/${encodeURIComponent(projectId)}/calendars/${encodeURIComponent(calendarId)}`,
+      ),
+    createCalendar: (projectId: string, body: CreateCalendarRequest) =>
+      request<CalendarResponse>(
+        'POST',
+        `/projects/${encodeURIComponent(projectId)}/calendars`,
+        body,
+      ),
+    updateCalendar: (projectId: string, calendarId: string, body: UpdateCalendarRequest) =>
+      request<CalendarResponse>(
+        'PATCH',
+        `/projects/${encodeURIComponent(projectId)}/calendars/${encodeURIComponent(calendarId)}`,
+        body,
+      ),
+    addCalendarException: (
+      projectId: string,
+      calendarId: string,
+      body: CreateCalendarExceptionRequest,
+    ) =>
+      request<CalendarExceptionResponse>(
+        'POST',
+        `/projects/${encodeURIComponent(projectId)}/calendars/${encodeURIComponent(calendarId)}/exceptions`,
+        body,
+      ),
+    removeCalendarException: (projectId: string, calendarId: string, exceptionId: string) =>
+      request<void>(
+        'DELETE',
+        `/projects/${encodeURIComponent(projectId)}/calendars/${encodeURIComponent(calendarId)}/exceptions/${encodeURIComponent(exceptionId)}`,
+      ),
   };
 }
 
