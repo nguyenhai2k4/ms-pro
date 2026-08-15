@@ -6,6 +6,7 @@ import { ApiException } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCalendarRoutes } from './routes/calendars.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { registerTaskRoutes } from './routes/tasks.js';
 
 /**
  * The API is built around an injected `SqlExecutor` and an injected clock rather than reaching for
@@ -56,6 +57,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerAuthRoutes(app, deps);
   registerProjectRoutes(app, deps);
   registerCalendarRoutes(app, deps);
+  registerTaskRoutes(app, deps);
 
   return app;
 }
