@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { createApiClient } from './api/client.js';
+import { CalendarSettings } from './calendars/CalendarSettings.jsx';
 import { useSessionStore } from './store/session.js';
 import { EmptyProjectState } from './views/EmptyProjectState.jsx';
 import { SignInPage } from './views/SignInPage.jsx';
@@ -53,6 +54,8 @@ interface ProjectPageProps {
 }
 
 function ProjectPage({ api, projectId, onBack }: ProjectPageProps): JSX.Element {
+  const [section, setSection] = useState<'tasks' | 'calendars'>('tasks');
+
   const project = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => api.getProject(projectId),
@@ -71,6 +74,9 @@ function ProjectPage({ api, projectId, onBack }: ProjectPageProps): JSX.Element 
 
   const summary = project.data;
   const canEdit = summary.role === 'admin' || summary.role === 'editor';
+  // FR-CAL-01..03: unlike task edit (Admin or Editor), calendar mutation is Admin-only
+  // server-side — `canEdit` above is deliberately not reused for this.
+  const canManageCalendars = summary.role === 'admin';
 
   return (
     <main>
@@ -79,7 +85,26 @@ function ProjectPage({ api, projectId, onBack }: ProjectPageProps): JSX.Element 
       </button>
       <h1>{summary.project.name}</h1>
 
-      {summary.taskCount === 0 ? (
+      <nav aria-label="Project sections">
+        <button
+          type="button"
+          aria-current={section === 'tasks' ? 'page' : undefined}
+          onClick={() => setSection('tasks')}
+        >
+          Tasks
+        </button>
+        <button
+          type="button"
+          aria-current={section === 'calendars' ? 'page' : undefined}
+          onClick={() => setSection('calendars')}
+        >
+          Calendars
+        </button>
+      </nav>
+
+      {section === 'calendars' ? (
+        <CalendarSettings api={api} projectId={projectId} canManage={canManageCalendars} />
+      ) : summary.taskCount === 0 ? (
         <EmptyProjectState
           projectName={summary.project.name}
           canEdit={canEdit}
