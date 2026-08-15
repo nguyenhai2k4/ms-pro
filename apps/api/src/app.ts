@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { ApiException } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerCalendarRoutes } from './routes/calendars.js';
 import { registerProjectRoutes } from './routes/projects.js';
 
 /**
@@ -54,6 +55,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerAuthRoutes(app, deps);
   registerProjectRoutes(app, deps);
+  registerCalendarRoutes(app, deps);
 
   return app;
 }
