@@ -1,18 +1,19 @@
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { createApiClient } from './api/client.js';
 import { CalendarSettings } from './calendars/CalendarSettings.jsx';
 import { useSessionStore } from './store/session.js';
-import { EmptyProjectState } from './views/EmptyProjectState.jsx';
+import { TaskWorkspace } from './tasks/TaskWorkspace.jsx';
 import { SignInPage } from './views/SignInPage.jsx';
 import { ProjectListPage } from './views/ProjectListPage.jsx';
 
 /**
  * P0 shell: sign in, list projects, create a project, land in its empty state.
+ * P1 adds task/WBS CRUD (FR-TSK-01..09, FR-VIEW-03) via `TaskWorkspace`.
  *
- * Deliberately not here — these are P1 and later, and stubbing them now would create UI that has
- * to be thrown away once the data model is exercised: task CRUD, the Gantt route, Kanban,
- * Calendar, resource sheet, reports.
+ * Deliberately not here — these are P2 and later, and stubbing them now would create UI that has
+ * to be thrown away once the data model is exercised: the Gantt route, Kanban, Calendar, resource
+ * sheet, reports.
  */
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -61,21 +62,13 @@ function ProjectPage({ api, projectId, onBack }: ProjectPageProps): JSX.Element 
     queryFn: () => api.getProject(projectId),
   });
 
-  const addTask = useMutation({
-    // Task creation lands in P1 (FR-TSK-01). The empty state's primary action is wired to a
-    // mutation that does not exist yet, so it reports that rather than pretending.
-    mutationFn: async () => {
-      throw new Error('Task creation ships in P1 (FR-TSK-01).');
-    },
-  });
-
   if (project.isLoading) return <p>Loading project…</p>;
   if (project.isError || project.data === undefined) return <p>Could not load that project.</p>;
 
   const summary = project.data;
-  const canEdit = summary.role === 'admin' || summary.role === 'editor';
   // FR-CAL-01..03: unlike task edit (Admin or Editor), calendar mutation is Admin-only
-  // server-side — `canEdit` above is deliberately not reused for this.
+  // server-side — task-side `canEdit` logic (inside `TaskWorkspace`) is deliberately not
+  // reused for this.
   const canManageCalendars = summary.role === 'admin';
 
   return (
@@ -104,17 +97,14 @@ function ProjectPage({ api, projectId, onBack }: ProjectPageProps): JSX.Element 
 
       {section === 'calendars' ? (
         <CalendarSettings api={api} projectId={projectId} canManage={canManageCalendars} />
-      ) : summary.taskCount === 0 ? (
-        <EmptyProjectState
-          projectName={summary.project.name}
-          canEdit={canEdit}
-          onAddFirstTask={() => addTask.mutate()}
-        />
       ) : (
-        <p>{summary.taskCount} tasks. The Gantt and grid views arrive in P1.</p>
+        <TaskWorkspace
+          api={api}
+          projectId={projectId}
+          projectName={summary.project.name}
+          role={summary.role}
+        />
       )}
-
-      {addTask.isError ? <p role="alert">{(addTask.error as Error).message}</p> : null}
     </main>
   );
 }
