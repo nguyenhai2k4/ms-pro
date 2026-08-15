@@ -56,7 +56,11 @@ export type AuthProvider = z.infer<typeof authProviderSchema>;
 export const calendarTemplateSchema = z.enum(['mon_fri', 'us']);
 export type CalendarTemplate = z.infer<typeof calendarTemplateSchema>;
 
-/** FR-COL-07. Exactly the entity set the FRS requires audited — extend the FRS before this. */
+/**
+ * FR-COL-07. Exactly the entity set the FRS requires audited — extend the FRS before this.
+ * `calendar` added at P1 entry: FR-CAL-01..04 CRUD is schedule-affecting and invariant 4
+ * (CLAUDE.md) requires it audited; 0001_init.sql did not anticipate P1's calendar mutations.
+ */
 export const auditEntityTypeSchema = z.enum([
   'task',
   'dependency',
@@ -65,6 +69,7 @@ export const auditEntityTypeSchema = z.enum([
   'baseline',
   'project_member',
   'project',
+  'calendar',
 ]);
 export type AuditEntityType = z.infer<typeof auditEntityTypeSchema>;
 
