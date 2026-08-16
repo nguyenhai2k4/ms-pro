@@ -819,6 +819,81 @@ describe('FR-AUTH-04: calendar routes are not an id oracle for a caller in anoth
   });
 });
 
+describe('FR-CAL-04: the regional template is regional in name only', () => {
+  /**
+   * FR-CAL-04 asks for "regional calendar templates (e.g. US, and a generic Mon-Fri)". What makes
+   * the US template regional is its holiday set, not its weekly pattern — and
+   * `apps/api/src/calendars.ts` says so itself: the US holidays "land with the calendar work in
+   * P1". P1 built the mechanism (FR-CAL-02 exceptions) and never populated the template with it,
+   * so `us` and `mon_fri` are byte-identical apart from the display name.
+   *
+   * Pinned with `it.fails` rather than left silent, matching how P0's known defects are recorded:
+   * which holidays, on which observed-date rule, and over what year range is a product decision
+   * for tech-lead, not something a test author should invent.
+   */
+  it.fails('KNOWN GAP: the us template ships no US holidays, so it equals mon_fri', async () => {
+    const admin = await register('dana@acme.test', 'Acme Construction');
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/projects',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        name: 'US project',
+        startDate: '2026-09-01T08:00:00.000Z',
+        calendarTemplate: 'us',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const projectId = created.json().project.id as string;
+    const calendarId = created.json().project.calendarId as string;
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/projects/${projectId}/calendars/${calendarId}`,
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+    // A US regional calendar with no non-working exceptions is not a regional calendar.
+    expect(
+      detail.json().exceptions.length,
+      'FR-CAL-04: the us template carries no holiday exceptions',
+    ).toBeGreaterThan(0);
+  });
+
+  it('documents the current behaviour: us and mon_fri differ only by display name', async () => {
+    const admin = await register('dana@acme.test', 'Acme Construction');
+    const shapes: Array<Record<string, unknown>> = [];
+
+    for (const calendarTemplate of ['mon_fri', 'us'] as const) {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          name: `Project ${calendarTemplate}`,
+          startDate: '2026-09-01T08:00:00.000Z',
+          calendarTemplate,
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/projects/${created.json().project.id}/calendars/${created.json().project.calendarId}`,
+        headers: { authorization: `Bearer ${admin.token}` },
+      });
+      const { calendar, exceptions } = detail.json();
+      shapes.push({
+        workingDays: calendar.workingDays,
+        workingHoursStartMinute: calendar.workingHoursStartMinute,
+        workingHoursEndMinute: calendar.workingHoursEndMinute,
+        exceptionCount: exceptions.length,
+      });
+    }
+
+    expect(shapes[0]).toEqual(shapes[1]);
+  });
+});
+
 describe('FR-CAL-01: a project keeps exactly one default calendar', () => {
   it('never lets the create endpoint mint a second default', async () => {
     const f = await fixture();
