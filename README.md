@@ -55,15 +55,40 @@ pnpm -r typecheck && pnpm -r lint && pnpm format && pnpm -r test
 
 ## Status
 
-**P0 (Foundations) — landed. P1 (Task/WBS core) — in progress.** See
-[`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) §6.
+**P0 (Foundations) — landed. P1 (Task/WBS core) — landed, QA-reviewed.** See
+[`docs/IMPLEMENTATION-PLAN.md`](docs/IMPLEMENTATION-PLAN.md) §6. P2 (Scheduling engine) is next.
 
 P0 landed: pnpm workspace and toolchain, CI, local dev stack, the interface contracts in
 `packages/shared-types`, the database schema and migration runner, the API (auth, org/project
 shell, RBAC, audit log), and the web shell with the Gantt adapter contract and its accessible
 table representation.
 
-Outstanding and tracked, not silently dropped:
+P1 landed: the mutation-intent envelope (ADR-007), task/WBS CRUD with the in-process P1 rollup
+scheduler (FR-TSK-01..09, FR-TRK-04 partial — see below), calendar CRUD (FR-CAL-01..04, FR-CAL-04
+partial — see below), and both surfaces' UI in `apps/web`. Independently QA-reviewed: 352 tests
+passing, two real bugs found and fixed in review (a cross-tenant calendar reference that was also
+an existence oracle; an unvalidated half-day exception time range), RBAC negative paths and
+cross-project id-oracle protection extended to every new endpoint.
+
+Known limitations carried out of P1, tracked rather than silently dropped:
+
+- **FR-TRK-04 is partial.** Duration-weighted % complete rollup works; the "manual override at
+  the parent level" half needs a persisted override flag the P0 schema doesn't have, and is
+  deferred rather than bolted on ahead of a real UI need for it.
+- **FR-CAL-04 is thin.** The `us` and `mon_fri` templates are byte-identical apart from a display
+  name — no actual US holiday data ships yet. Pinned as a failing test rather than fixed, because
+  which holidays, which observed-date rule, and whether they're seeded per-project or shared
+  org-wide are product decisions, not implementation ones.
+- **The rollup's per-row query pattern won't hold FR-SCH-06's P2 perf budget** (<500ms @ 5k tasks,
+  <150ms incremental) — it does one round trip per ancestor and per renumbered sibling, fine at P1
+  scale, not at CPM scale. This is a set-based redesign for `scheduler-engineer` to fold into P2,
+  not a P1 patch.
+- **No accessibility or cross-browser automation yet** (axe/jest-axe, Playwright e2e) — P1 has
+  component-level accessibility tests (labels, roles, no color-only signal) but nothing automated
+  against WCAG 2.1 AA end-to-end, and `docs/MODEL-ROUTING.md`/the risk register call for this
+  starting P1, not P8.
+
+Also still outstanding from P0, not silently dropped:
 
 - **Gantt renderer** ([`docs/adr/ADR-009`](docs/adr/ADR-009-gantt-open-source-fallback.md)) —
   no commercial license; the decision is now to fork and harden `frappe-gantt` behind the
@@ -74,6 +99,3 @@ Outstanding and tracked, not silently dropped:
 - **FR-AUTH-02** (Google/Microsoft OAuth) — the managed provider is not configured; password
   auth only.
 - **Email delivery** — password-reset tokens are minted and consumed correctly but not sent.
-
-P1 entry landed the mutation-intent envelope (ADR-007) and task/calendar REST contracts;
-Task/WBS CRUD + rollup and calendar CRUD are in progress.
