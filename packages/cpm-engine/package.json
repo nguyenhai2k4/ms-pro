@@ -1,0 +1,27 @@
+{
+  "name": "@projectapp/cpm-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure CPM/leveling algorithms — no I/O, no DB, no network (CLAUDE.md invariant 1, ADR-010)",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@projectapp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

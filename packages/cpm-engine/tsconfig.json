@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": true,
+    // No DOM. The engine is a pure computation called from Node (apps/api in P2, the Scheduler
+    // Service in P3); a `document` reference in here would be a category error, and inheriting
+    // lib.dom is how one shows up.
+    "lib": ["ES2022"],
+    // Node types are here for the *test* files only — `src/purity.test.ts` reads this directory
+    // off disk to prove no engine source imports a `node:` builtin. Engine source is kept free of
+    // them by the `packages/cpm-engine` block in eslint.config.mjs (invariant 1) plus that same
+    // scanner, which is the check that survives someone loosening the lint config.
+    "types": ["node"]
+  },
+  "include": ["src"]
+}
