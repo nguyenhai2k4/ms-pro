@@ -9,12 +9,11 @@ import {
 } from '@projectapp/shared-types';
 import type { ProjectRole } from '@projectapp/shared-types';
 import type { FastifyInstance } from 'fastify';
-import { auditedMutation } from '../audit/audit-writer.js';
-import type { AuditRecord } from '../audit/audit-writer.js';
+import { auditedMutation, auditRecordsFor } from '../audit/audit-writer.js';
 import { requirePermission, resolveSession } from '../auth/context.js';
 import { forbidden, validationFailed } from '../errors.js';
-import { applyTaskIntent, TASK_SELECT, toTask } from '../scheduler/rollup.js';
-import type { TaskChange, TaskRow } from '../scheduler/rollup.js';
+import { applyScheduleIntent, TASK_SELECT, toTask } from '../scheduler/rollup.js';
+import type { TaskRow } from '../scheduler/rollup.js';
 import type { AppDeps } from '../app.js';
 
 /**
@@ -23,7 +22,7 @@ import type { AppDeps } from '../app.js';
  * Two structural rules hold across every handler here:
  *
  *  1. **No schedule arithmetic.** A handler validates the request, checks RBAC, builds a
- *     `TaskIntent` and hands the envelope to `applyTaskIntent`. Nothing in this file computes or
+ *     `TaskIntent` and hands the envelope to `applyScheduleIntent`. Nothing in this file computes or
  *     writes `start`, `finish` or any rollup-derived column — invariant 2. Building the envelope
  *     through `mutationIntentEnvelopeSchema` rather than by hand means the contract in
  *     `packages/shared-types/src/intents.ts` is enforced at the boundary, not assumed.
@@ -33,34 +32,6 @@ import type { AppDeps } from '../app.js';
  *     the grandparent's own before/after is in the list and gets its own audit row. A handler that
  *     audited only the task named in the URL would leave the schedule-affecting half unrecorded.
  */
-
-const auditRecordsFor = (changes: readonly TaskChange[]): AuditRecord[] =>
-  changes.map((change) => {
-    const entityId = (change.after ?? change.before)!.id;
-    if (change.before === null) {
-      return {
-        entityType: 'task' as const,
-        entityId,
-        action: 'create' as const,
-        after: change.after,
-      };
-    }
-    if (change.after === null) {
-      return {
-        entityType: 'task' as const,
-        entityId,
-        action: 'delete' as const,
-        before: change.before,
-      };
-    }
-    return {
-      entityType: 'task' as const,
-      entityId,
-      action: 'update' as const,
-      before: change.before,
-      after: change.after,
-    };
-  });
 
 export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
   const { exec, now } = deps;
@@ -101,8 +72,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
         exec,
         { projectId, actorUserId: user.userId },
         async () => {
-          const result = await applyTaskIntent(exec, envelope);
-          return { result, audit: auditRecordsFor(result.changes) };
+          const result = await applyScheduleIntent(exec, envelope);
+          return { result, audit: auditRecordsFor('task', result.changes) };
         },
       );
 
@@ -163,8 +134,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
         exec,
         { projectId, actorUserId: user.userId },
         async () => {
-          const result = await applyTaskIntent(exec, envelope);
-          return { result, audit: auditRecordsFor(result.changes) };
+          const result = await applyScheduleIntent(exec, envelope);
+          return { result, audit: auditRecordsFor('task', result.changes) };
         },
       );
 
@@ -203,8 +174,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
         exec,
         { projectId, actorUserId: user.userId },
         async () => {
-          const result = await applyTaskIntent(exec, envelope);
-          return { result, audit: auditRecordsFor(result.changes) };
+          const result = await applyScheduleIntent(exec, envelope);
+          return { result, audit: auditRecordsFor('task', result.changes) };
         },
       );
 
@@ -239,8 +210,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: AppDeps): void {
       );
 
       await auditedMutation(exec, { projectId, actorUserId: user.userId }, async () => {
-        const result = await applyTaskIntent(exec, envelope);
-        return { result, audit: auditRecordsFor(result.changes) };
+        const result = await applyScheduleIntent(exec, envelope);
+        return { result, audit: auditRecordsFor('task', result.changes) };
       });
 
       return reply.status(204).send();

@@ -1,4 +1,4 @@
-import type { ApiErrorCode } from '@projectapp/shared-types';
+import type { ApiErrorCode, DependencyCycleDetails } from '@projectapp/shared-types';
 import { HTTP_STATUS_BY_ERROR_CODE } from '@projectapp/shared-types';
 
 /**
@@ -37,3 +37,15 @@ export const validationFailed = (details: unknown, message = 'Request failed val
   new ApiException('validation_failed', message, details);
 
 export const conflict = (message: string): ApiException => new ApiException('conflict', message);
+
+/**
+ * FR-SCH-03: the dependency edit would close a loop. Distinct from `conflict` (which shares its
+ * 409) because the client renders it differently — `details` names the exact path and arrows, so
+ * "A -> B -> C -> A" can be highlighted instead of a generic failure toast. `details` must satisfy
+ * `dependencyCycleDetailsSchema`; the caller parses it through that schema rather than this
+ * function taking `unknown` and hoping.
+ */
+export const dependencyCycle = (
+  details: DependencyCycleDetails,
+  message = 'That link would create a dependency cycle',
+): ApiException => new ApiException('dependency_cycle', message, details);

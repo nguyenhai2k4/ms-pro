@@ -1549,7 +1549,7 @@ describe('FR-AUTH-04: task and calendar ids do not leak across a project boundar
 
   /**
    * `task.calendar_id` is a bare `REFERENCES calendar (id)`: the database cannot say "and it must
-   * be a calendar of this project". Before this was checked in `applyTaskIntent`, a caller could
+   * be a calendar of this project". Before this was checked in `applyScheduleIntent`, a caller could
    * attach any calendar in the installation — including one belonging to a different organization
    * — to their own task, and the two failure modes differed (201 for a real foreign id, 500 for an
    * unused one), which made the endpoint an existence oracle for calendar ids.

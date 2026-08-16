@@ -188,6 +188,39 @@ const MUTATING_ENDPOINTS: readonly MutatingEndpoint[] = [
     payload: () => ({ role: 'admin' }),
     deniedRoles: NON_ADMIN_ROLES,
   },
+  // The dependency surface (P2, FR-SCH-01..04). An Editor holds `dependency:write` — FR-ACL-03
+  // gives them full scheduling control — so only Contributor and Viewer are denied here; a
+  // Contributor's exclusion *is* FR-ACL-04's "no structural edits", and a Viewer's is FR-ACL-05.
+  //
+  // The two id-addressed routes deliberately point at a link id that does not exist. Permission is
+  // checked before the id is resolved, so the answer must still be 403 and not 404: a denied role
+  // that could tell "no such link" from "not allowed" would have a working existence oracle for
+  // every link in a project they may not edit. `dependencies.test.ts` covers the positive paths.
+  {
+    label: 'POST /projects/:projectId/dependencies (FR-SCH-01, FR-ACL-04)',
+    method: 'POST',
+    url: (f) => `/projects/${f.projectId}/dependencies`,
+    payload: () => ({
+      predecessorId: '00000000-0000-4000-8000-0000000000a1',
+      successorId: '00000000-0000-4000-8000-0000000000a2',
+      type: 'FS',
+    }),
+    deniedRoles: ['contributor', 'viewer'],
+  },
+  {
+    label: 'PATCH /projects/:projectId/dependencies/:dependencyId (FR-SCH-02, FR-ACL-04)',
+    method: 'PATCH',
+    url: (f) => `/projects/${f.projectId}/dependencies/00000000-0000-4000-8000-0000000000a3`,
+    payload: () => ({ lagHours: 8 }),
+    deniedRoles: ['contributor', 'viewer'],
+  },
+  {
+    label: 'DELETE /projects/:projectId/dependencies/:dependencyId (FR-SCH-04, FR-ACL-04)',
+    method: 'DELETE',
+    url: (f) => `/projects/${f.projectId}/dependencies/00000000-0000-4000-8000-0000000000a3`,
+    payload: () => ({}),
+    deniedRoles: ['contributor', 'viewer'],
+  },
 ];
 
 describe('FR-ACL-03 / invariant 3: the full mutating surface denies every non-admin role', () => {
@@ -319,6 +352,7 @@ describe('FR-AUTH-04: a non-member gets not_found, never forbidden', () => {
     const strangerId = await addUserToOrg(f.orgId, 'stranger@acme.test');
     const strangerToken = await sessionFor(strangerId);
 
+    const linkId = '00000000-0000-4000-8000-0000000000a3';
     const routes = [
       ['GET', `/projects/${f.projectId}`, {}],
       ['PATCH', `/projects/${f.projectId}`, { name: 'x' }],
@@ -327,6 +361,9 @@ describe('FR-AUTH-04: a non-member gets not_found, never forbidden', () => {
       ['POST', `/projects/${f.projectId}/members`, { email: 'a@acme.test', role: 'viewer' }],
       ['PATCH', `/projects/${f.projectId}/members/${f.adminUserId}`, { role: 'viewer' }],
       ['GET', `/projects/${f.projectId}/audit`, {}],
+      ['GET', `/projects/${f.projectId}/dependencies`, {}],
+      ['PATCH', `/projects/${f.projectId}/dependencies/${linkId}`, { lagHours: 1 }],
+      ['DELETE', `/projects/${f.projectId}/dependencies/${linkId}`, {}],
     ] as const;
 
     for (const [method, url, payload] of routes) {

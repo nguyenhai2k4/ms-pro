@@ -24,7 +24,7 @@ import type { CpmTaskSchedule } from '@projectapp/shared-types';
  * This is a storage primitive, not the write path. It does not call the engine, does not decide
  * *which* tasks to recompute, and is not wired into any route yet — that is W5-2, dispatched after
  * the calendar kernel and CPM passes exist. It also never touches `task.start` / `task.finish` /
- * `task.duration_hours`; those stay `applyTaskIntent`'s (ADR-007) responsibility.
+ * `task.duration_hours`; those stay `applyScheduleIntent`'s (ADR-007) responsibility.
  */
 export async function bulkUpsertTaskSchedules(
   exec: SqlExecutor,

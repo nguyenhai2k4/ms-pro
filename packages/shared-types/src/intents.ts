@@ -31,14 +31,14 @@ import {
  * (P3 introduces concurrent WebSocket-driven mutation). ADR-007 leaves open whether the
  * ADR-002 single-writer per-project queue is needed in P1; the answer is no — a per-request
  * Postgres transaction already serialises conflicting writes to the same rows, and there is no
- * concurrent in-process consumer yet to order. `applyTaskIntent` (the scheduler's single entry
+ * concurrent in-process consumer yet to order. `applyScheduleIntent` (the scheduler's single entry
  * point) is deliberately shaped so a queue can sit in front of it at P3 entry without changing
  * this envelope or any caller — see `apps/api/src/scheduler/rollup.ts`.
  *
  * These describe *what the user asked for*, not what an engine computes (ADR-007's bound on
- * scope creep). P1's intents are create/update/reparent/delete a task — a subset of the eventual
- * P2 set (which adds dependency and constraint-driven shifts). Widening this later is additive;
- * if it turns out to be structural, that is a superseding ADR, not a quiet edit here.
+ * scope creep). P1's intents were create/update/reparent/delete a task; P2 widened the set with
+ * the dependency intents below (contract 0.4.0). Widening it again is additive; if it turns out to
+ * be structural, that is a superseding ADR, not a quiet edit here.
  */
 
 const baseTaskFieldsSchema = z.object({
@@ -207,14 +207,19 @@ export type DependencyIntent = z.infer<typeof dependencyIntentSchema>;
 /**
  * Every intent the P2 writer accepts.
  *
- * ## Why the envelope below is not bound to this yet
+ * ## The envelope is bound to this as of contract 0.4.0 (P2 work item W2-2)
  *
- * Widening `mutationIntentEnvelopeSchema.intent` to include dependency intents is a **breaking**
- * contract change on purpose: `applyTaskIntent`'s exhaustive `switch` stops compiling, which is
- * the loud failure we want when a new intent has no writer. Landing that widening in the contract
- * commit would leave `apps/api` red for the whole of P2's first wave, so the rebind happens in the
- * *same commit as the handler that satisfies it* — see the P2 work breakdown, item W2-2. A contract
- * that advertises a capability the writer does not have is worse than one that lands a wave late.
+ * Widening `mutationIntentEnvelopeSchema.intent` from `taskIntentSchema` to this union was a
+ * **breaking** contract change on purpose: it stops `applyScheduleIntent`'s exhaustive `switch`
+ * compiling until the three dependency kinds have a writer, which is the loud failure we want when
+ * a new intent has none. That is why the rebind did not land in the contract commit that introduced
+ * the dependency intents (0.3.0, which would have left `apps/api` red for the whole of P2's first
+ * wave) but in the *same commit as the handler that satisfies it* — `apps/api/src/routes/dependencies.ts`
+ * plus the dependency arm of `apps/api/src/scheduler/rollup.ts`. A contract that advertises a
+ * capability the writer does not have is worse than one that lands a wave late.
+ *
+ * The same rule applies to the next widening (constraint-driven shifts, resource intents): add the
+ * kind here, and rebind only when something can execute it.
  */
 export const scheduleIntentSchema = z.union([taskIntentSchema, dependencyIntentSchema]);
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
@@ -223,9 +228,14 @@ export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
  * What travels from `apps/api` to the scheduler. `issuedAt` is the API's clock, not a client
  * timestamp — never trust a caller's notion of "when," per the same reasoning that keeps `Date`
  * off the wire (`primitives.ts`).
+ *
+ * `projectId` is the envelope's, not the intent's: `updateDependency` / `deleteDependency` (and
+ * every task intent bar `createTask`) address a row by id alone, and the writer scopes that id to
+ * this project before touching it. An id that resolves in another project is absent, not
+ * forbidden — FR-AUTH-04.
  */
 export const mutationIntentEnvelopeSchema = z.object({
-  intent: taskIntentSchema,
+  intent: scheduleIntentSchema,
   projectId: projectIdSchema,
   actorUserId: userIdSchema,
   issuedAt: isoDateTimeSchema,
