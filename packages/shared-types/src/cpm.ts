@@ -334,7 +334,7 @@ export const CPM_ERROR_DIAGNOSTIC_CODES = Object.freeze([
  * critical, conflict) plus the three fields that get **persisted back onto the task row**.
  *
  * The split is the point. `start`/`finish`/`durationHours` are the task's dates, which already
- * exist as columns and which `applyTaskIntent` already owns as the single write path (ADR-007).
+ * exist as columns and which `applyScheduleIntent` already owns as the single write path (ADR-007).
  * ES/EF/LS/LF/float are engine-derived analysis that must never be user-settable — `schedule.ts`
  * says why — and they land in their own engine-owned table (`task_schedule`, migration 0003), not
  * as task columns. One result row, two destinations, no second source of truth.

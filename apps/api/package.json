@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@projectapp/cpm-engine": "workspace:*",
     "@projectapp/db": "workspace:*",
     "@projectapp/shared-types": "workspace:*",
     "fastify": "^5.1.0",

@@ -14,6 +14,7 @@ import {
 import {
   createDependencyIntentSchema,
   deleteDependencyIntentSchema,
+  mutationIntentEnvelopeSchema,
   scheduleIntentSchema,
   updateDependencyIntentSchema,
 } from './intents.js';
@@ -367,8 +368,55 @@ describe('Dependency intents (FR-SCH-01..04)', () => {
   });
 });
 
+/**
+ * The W2-2 rebind (contract 0.4.0). Before it, an envelope carrying a dependency intent parsed
+ * `false` — the intent existed but nothing could carry it. These cases are the contract half of
+ * `apps/api/src/dependencies.test.ts`'s end-to-end proof.
+ */
+describe('mutation-intent envelope carries the whole P2 vocabulary (FR-SCH-01..04)', () => {
+  const envelope = {
+    projectId: PROJECT_ID,
+    actorUserId: '00000000-0000-4000-8000-0000000000aa',
+    issuedAt: '2026-09-01T09:00:00.000Z',
+  };
+
+  it('accepts every dependency intent kind, not only the four task kinds', () => {
+    for (const intent of [
+      {
+        kind: 'createDependency',
+        projectId: PROJECT_ID,
+        predecessorId: TASK_A,
+        successorId: TASK_B,
+        type: 'FS',
+        lagHours: 0,
+      },
+      { kind: 'updateDependency', dependencyId: DEP_ID, lagHours: -8 },
+      { kind: 'deleteDependency', dependencyId: DEP_ID },
+    ]) {
+      const result = mutationIntentEnvelopeSchema.safeParse({ ...envelope, intent });
+      expect(result.success, `envelope must carry ${String(intent.kind)}`).toBe(true);
+    }
+  });
+
+  it('still accepts a task intent — the widening is a superset, not a replacement', () => {
+    const result = mutationIntentEnvelopeSchema.safeParse({
+      ...envelope,
+      intent: { kind: 'deleteTask', taskId: TASK_A },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a kind no writer has a case for', () => {
+    const result = mutationIntentEnvelopeSchema.safeParse({
+      ...envelope,
+      intent: { kind: 'levelResources', projectId: PROJECT_ID },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('contract version', () => {
-  it('is bumped for the P2 additions', () => {
-    expect(CONTRACT_VERSION).toBe('0.3.0');
+  it('is bumped for the envelope rebind (W2-2)', () => {
+    expect(CONTRACT_VERSION).toBe('0.4.0');
   });
 });

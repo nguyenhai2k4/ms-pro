@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@projectapp/cpm-engine':
+        specifier: workspace:*
+        version: link:../../packages/cpm-engine
       '@projectapp/db':
         specifier: workspace:*
         version: link:../../packages/db

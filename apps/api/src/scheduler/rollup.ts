@@ -3,6 +3,7 @@ import type { SqlExecutor } from '@projectapp/db';
 import { taskInvariantsSchema } from '@projectapp/shared-types';
 import type {
   ConstraintType,
+  Dependency,
   MutationIntentEnvelope,
   ScheduleMode,
   TaskStatus,
@@ -10,32 +11,39 @@ import type {
 import { conflict, notFound, validationFailed } from '../errors.js';
 
 /**
- * The P1 in-process scheduler (ADR-007).
+ * The in-process scheduler (ADR-007).
  *
  * ## What this is
  *
  * `apps/api` must never write `task.start` / `task.finish` / the rollup-derived columns from its
  * own arithmetic (CLAUDE.md invariant 2). Route handlers therefore validate a request, turn it
- * into a `TaskIntent` and hand the envelope to `applyTaskIntent` — the single function in this
- * repo allowed to write those columns. In P2 the same envelope crosses a process boundary to the
- * standalone Scheduler Service and callers do not change; in P3 the ADR-002 single-writer queue
- * slots in front of this entry point, which is why it stays *one* function taking *one* envelope
- * rather than a set of exported mutators. ADR-007's open question — whether P1 needs that queue —
- * is answered "no" in `packages/shared-types/src/intents.ts`: one writer per HTTP request, no
- * realtime clients yet, and a Postgres transaction already serialises conflicting row writes.
+ * into a `ScheduleIntent` and hand the envelope to `applyScheduleIntent` — the single function in
+ * this repo allowed to write those columns, and (since P2 work item W2-2) the single function that
+ * writes the `dependency` table, for the same reason: a link edit is schedule-affecting, so an
+ * `INSERT` in a route handler would be a second write path that does not recompute. In P2 the same
+ * envelope crosses a process boundary to the standalone Scheduler Service and callers do not
+ * change; in P3 the ADR-002 single-writer queue slots in front of this entry point, which is why it
+ * stays *one* function taking *one* envelope rather than a set of exported mutators. ADR-007's open
+ * question — whether P1 needs that queue — is answered "no" in
+ * `packages/shared-types/src/intents.ts`: one writer per HTTP request, no realtime clients yet, and
+ * a Postgres transaction already serialises conflicting row writes.
  *
  * ## What this is emphatically NOT
  *
- * It is **not** a preview of `packages/cpm-engine`. There is no dependency graph, no constraint
- * enforcement, no forward/backward pass, no float, and no calendar-aware date arithmetic. Those
- * are FR-SCH-01..09 and belong to P2. The two places that boundary shows:
+ * It is **not** a preview of `packages/cpm-engine`. There is no constraint enforcement, no
+ * forward/backward pass, no float, and no calendar-aware date arithmetic. Those are FR-SCH-04..09
+ * and are separate P2 work items. The three places that boundary shows:
  *
  *  - a leaf's `finish` is `start + durationHours` of **wall-clock** time, not working time;
  *  - a parent's `durationHours` is the raw wall-clock span of its children, not the working-hours
- *    duration a calendar would produce (FR-SCH-07).
+ *    duration a calendar would produce (FR-SCH-07);
+ *  - **a dependency mutation moves no dates.** `applyCreateDependency` and friends write the
+ *    `dependency` row and nothing else. Propagating a link's effect onto successor dates is the
+ *    forward/backward pass (work item W3-1), which does not exist yet — the absence of date
+ *    shifting here is a scope boundary, not a bug. See `applyCreateDependency`.
  *
- * Both are deliberate P1 scope boundaries, not oversights. When the CPM engine lands it owns these
- * numbers and this module's date arithmetic goes away.
+ * All three are deliberate scope boundaries, not oversights. When the CPM engine's passes land they
+ * own these numbers and this module's date arithmetic goes away.
  *
  * ## Rollup rule (FR-TSK-03, FR-TRK-04)
  *
@@ -147,6 +155,33 @@ export function toTask(row: TaskRow) {
 
 export type TaskDto = ReturnType<typeof toTask>;
 
+export interface DependencyRow {
+  id: string;
+  project_id: string;
+  predecessor_id: string;
+  successor_id: string;
+  type: Dependency['type'];
+  lag_hours: number;
+  created_at: Date | string;
+}
+
+export const DEPENDENCY_SELECT =
+  'id, project_id, predecessor_id, successor_id, type, lag_hours, created_at';
+
+/** Row -> the `Dependency` shape in `packages/shared-types/src/entities.ts`. */
+export function toDependency(row: DependencyRow): Dependency {
+  return {
+    id: row.id as Dependency['id'],
+    projectId: row.project_id as Dependency['projectId'],
+    predecessorId: row.predecessor_id as Dependency['predecessorId'],
+    successorId: row.successor_id as Dependency['successorId'],
+    type: row.type,
+    // `lag_hours` is `double precision`; some drivers hand numerics back as strings.
+    lagHours: Number(row.lag_hours),
+    createdAt: iso(row.created_at),
+  };
+}
+
 // ----------------------------------------------------------------------------------------------
 // The rollup itself — pure, so it can be tested without a database (FR-TSK-03, FR-TRK-04).
 // ----------------------------------------------------------------------------------------------
@@ -220,30 +255,53 @@ export interface TaskChange {
   readonly after: TaskDto | null;
 }
 
-export interface ApplyTaskIntentResult {
-  /** The directly addressed task after the mutation; null for a delete. */
+/** FR-SCH-01..04. The dependency counterpart of `TaskChange`; same null conventions. */
+export interface DependencyChange {
+  /** Null when the link was created by this mutation. */
+  readonly before: Dependency | null;
+  /** Null when the link was removed by this mutation. */
+  readonly after: Dependency | null;
+}
+
+export interface ApplyScheduleIntentResult {
+  /** The directly addressed task after the mutation; null for a delete or a dependency intent. */
   readonly task: TaskDto | null;
+  /** The directly addressed link after the mutation; null for a delete or a task intent. */
+  readonly dependency: Dependency | null;
   /**
    * Every task row this mutation created, changed or removed, in the order it happened: the
    * addressed task, every ancestor whose rollup moved, every task renumbered by a WBS change, and
    * every row removed by a cascade delete.
+   *
+   * A dependency intent leaves this empty in this phase — see the module header on why no dates
+   * move yet (W3-1 owns propagation). When the forward pass lands it fills this list, and the
+   * route's audit mapping already covers whatever appears in it.
    */
   readonly changes: readonly TaskChange[];
+  /** Every `dependency` row this mutation created, changed or removed. */
+  readonly dependencyChanges: readonly DependencyChange[];
 }
 
-class ChangeSet {
-  private readonly entries = new Map<string, { before: TaskDto | null; after: TaskDto | null }>();
+/**
+ * Generic over the row DTO so `task` and `dependency` changes accumulate through the same
+ * first-before-wins rule rather than through two hand-written copies of it that drift.
+ */
+class ChangeSet<T> {
+  private readonly entries = new Map<string, { before: T | null; after: T | null }>();
 
   /** The first `before` seen for a row wins — later touches only move the `after`. */
-  record(id: string, before: TaskDto | null, after: TaskDto | null): void {
+  record(id: string, before: T | null, after: T | null): void {
     const existing = this.entries.get(id);
     this.entries.set(id, { before: existing?.before ?? before, after });
   }
 
-  list(): TaskChange[] {
+  list(): { before: T | null; after: T | null }[] {
     return [...this.entries.values()];
   }
 }
+
+type TaskChangeSet = ChangeSet<TaskDto>;
+type DependencyChangeSet = ChangeSet<Dependency>;
 
 // ----------------------------------------------------------------------------------------------
 // Loads
@@ -394,7 +452,7 @@ async function recomputeChain(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
   fromTaskId: string | null,
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<void> {
   const projectId = envelope.projectId;
   let cursor = fromTaskId;
@@ -444,7 +502,7 @@ async function renumberChildren(
   envelope: MutationIntentEnvelope,
   parent: TaskRow | null,
   orderedChildIds: readonly string[],
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<void> {
   const projectId = envelope.projectId;
   const desired = new Map<string, string>();
@@ -519,7 +577,7 @@ const MS = (hours: number): number => hours * MS_PER_HOUR;
 async function applyCreate(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<TaskDto> {
   const intent = envelope.intent;
   if (intent.kind !== 'createTask') throw new Error('unreachable');
@@ -614,7 +672,7 @@ async function applyCreate(
 async function applyUpdate(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<TaskDto> {
   const intent = envelope.intent;
   if (intent.kind !== 'updateTask') throw new Error('unreachable');
@@ -722,7 +780,7 @@ async function applyUpdate(
 async function applyReparent(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<TaskDto> {
   const intent = envelope.intent;
   if (intent.kind !== 'reparentTask') throw new Error('unreachable');
@@ -792,7 +850,7 @@ async function applyReparent(
 async function applyDelete(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
-  changes: ChangeSet,
+  changes: TaskChangeSet,
 ): Promise<null> {
   const intent = envelope.intent;
   if (intent.kind !== 'deleteTask') throw new Error('unreachable');
@@ -872,35 +930,212 @@ async function applyDelete(
 }
 
 // ----------------------------------------------------------------------------------------------
+// Dependency intent handlers (FR-SCH-01, FR-SCH-02, FR-SCH-04)
+//
+// ## Why no dates move here
+//
+// A link is schedule-affecting, which is exactly why it goes through this module rather than
+// through an `INSERT` in a route handler (invariant 2). But *acting* on the link — pushing a
+// successor's dates out by the predecessor's finish plus lag — is the CPM forward/backward pass,
+// work item W3-1, which does not exist yet. Until it does, creating, retyping or deleting a link
+// writes the `dependency` row and its audit entry and moves nothing. That is the current scope
+// boundary, not a missing propagation bug; when W3-1 lands it hangs off these same three handlers
+// and starts populating `ApplyScheduleIntentResult.changes`.
+//
+// ## Why the cycle check is not repeated here
+//
+// FR-SCH-03 rejection lives in `apps/api/src/routes/dependencies.ts`, before any write is
+// attempted, because the route owes the caller a `409 dependency_cycle` with the offending path in
+// `details` and it needs the whole graph to produce it. Re-running `detectCycle` here would answer
+// the same question twice per request against the same rows in the same transaction. What *is*
+// repeated here is the project scoping of every id — see below.
+// ----------------------------------------------------------------------------------------------
+
+/** True for a Postgres unique-violation (SQLSTATE 23505) from either `pg` or PGlite. */
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: unknown }).code === '23505';
+
+/**
+ * Loads a link scoped to the project on the envelope. Every dependency intent bar `createDependency`
+ * addresses a row by id alone, so this predicate is the whole of FR-AUTH-04 for those routes: a real
+ * link id belonging to another project is *absent*, not forbidden, and the endpoint never becomes an
+ * oracle for which link ids exist elsewhere. `dependency.project_id` is a real column, so unlike
+ * `task.calendar_id` this is a direct filter rather than a join.
+ */
+async function requireDependency(
+  exec: SqlExecutor,
+  projectId: string,
+  dependencyId: string,
+): Promise<DependencyRow> {
+  const { rows } = await exec.query<DependencyRow>(
+    `SELECT ${DEPENDENCY_SELECT} FROM dependency WHERE id = $1 AND project_id = $2`,
+    [dependencyId, projectId],
+  );
+  const row = rows[0];
+  if (row === undefined) throw notFound('Dependency not found');
+  return row;
+}
+
+async function applyCreateDependency(
+  exec: SqlExecutor,
+  envelope: MutationIntentEnvelope,
+  changes: DependencyChangeSet,
+): Promise<Dependency> {
+  const intent = envelope.intent;
+  if (intent.kind !== 'createDependency') throw new Error('unreachable');
+  const projectId = envelope.projectId;
+
+  // FR-SCH-01: both ends must be tasks of *this* project. The route checks this too, off the graph
+  // it already loaded for cycle detection, and answers 404. Repeating it here is not redundancy for
+  // its own sake: `dependency.predecessor_id` / `successor_id` are bare `REFERENCES task (id)` with
+  // no project predicate the database can express, so this function — the single write path — must
+  // hold the rule on its own rather than trusting whichever caller reached it. The same defect
+  // class `requireProjectCalendar` exists to stop.
+  await requireTask(exec, projectId, intent.predecessorId);
+  await requireTask(exec, projectId, intent.successorId);
+
+  let inserted: DependencyRow;
+  try {
+    const { rows } = await exec.query<DependencyRow>(
+      `INSERT INTO dependency (id, project_id, predecessor_id, successor_id, type, lag_hours,
+                               created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING ${DEPENDENCY_SELECT}`,
+      [
+        randomUUID(),
+        projectId,
+        intent.predecessorId,
+        intent.successorId,
+        intent.type,
+        intent.lagHours,
+        // The API's clock, captured when the request arrived — never `now()` in SQL, so replaying
+        // an envelope through a P3 queue reproduces the same timestamp (`intents.ts`).
+        envelope.issuedAt,
+      ],
+    );
+    inserted = rows[0]!;
+  } catch (error) {
+    // UNIQUE (predecessor_id, successor_id). Two tasks are linked once; changing an existing link's
+    // type or lag is a PATCH, and reversing its direction is a delete plus a create.
+    if (isUniqueViolation(error)) {
+      throw conflict('These two tasks are already linked');
+    }
+    throw error;
+  }
+
+  const created = toDependency(inserted);
+  changes.record(created.id, null, created);
+  return created;
+}
+
+async function applyUpdateDependency(
+  exec: SqlExecutor,
+  envelope: MutationIntentEnvelope,
+  changes: DependencyChangeSet,
+): Promise<Dependency> {
+  const intent = envelope.intent;
+  if (intent.kind !== 'updateDependency') throw new Error('unreachable');
+
+  const before = toDependency(
+    await requireDependency(exec, envelope.projectId, intent.dependencyId),
+  );
+
+  // Only `type` and `lagHours` are addressable (`updateDependencyIntentSchema`): moving an endpoint
+  // is a different edge with a different blast radius, so it is a delete plus a create.
+  const { rows } = await exec.query<DependencyRow>(
+    `UPDATE dependency SET type = $2, lag_hours = $3 WHERE id = $1
+     RETURNING ${DEPENDENCY_SELECT}`,
+    [before.id, intent.type ?? before.type, intent.lagHours ?? before.lagHours],
+  );
+
+  const after = toDependency(rows[0]!);
+  changes.record(after.id, before, after);
+  return after;
+}
+
+async function applyDeleteDependency(
+  exec: SqlExecutor,
+  envelope: MutationIntentEnvelope,
+  changes: DependencyChangeSet,
+): Promise<null> {
+  const intent = envelope.intent;
+  if (intent.kind !== 'deleteDependency') throw new Error('unreachable');
+
+  // FR-COL-07: the row is read in full *before* it is removed, so the audit `before` describes the
+  // edge that was destroyed — predecessor, successor, type and lag — and not just an id nobody can
+  // resolve afterwards. An audit entry naming a deleted row's primary key and nothing else does not
+  // answer "what changed", which is the only question the log exists for.
+  const before = toDependency(
+    await requireDependency(exec, envelope.projectId, intent.dependencyId),
+  );
+  await exec.query(`DELETE FROM dependency WHERE id = $1`, [before.id]);
+  changes.record(before.id, before, null);
+  return null;
+}
+
+// ----------------------------------------------------------------------------------------------
 // The entry point
 // ----------------------------------------------------------------------------------------------
 
 /**
- * The only function permitted to write `task.start`, `task.finish` and the rollup-derived columns
- * (invariant 2).
+ * The only function permitted to write `task.start`, `task.finish`, the rollup-derived columns
+ * (invariant 2) and the `dependency` table.
  *
  * One envelope in, one description of everything that changed out. No `deps` parameter and no
  * clock read: `envelope.issuedAt` is the API's clock, captured once when the request arrived
  * (`intents.ts`), so replaying an envelope through a P3 queue produces the same timestamps rather
  * than the time it happened to be dequeued.
  *
- * Callers wrap this in `auditedMutation` — the returned `changes` are exactly the audit rows the
- * mutation owes (invariant 4), including the ancestors that moved as a rollup side effect.
+ * Callers wrap this in `auditedMutation` — the returned `changes` and `dependencyChanges` are
+ * exactly the audit rows the mutation owes (invariant 4), including the ancestors that moved as a
+ * rollup side effect.
+ *
+ * ## The switch is the contract check
+ *
+ * There is no `default:` arm and there never should be. `MutationIntentEnvelope['intent']` is
+ * `scheduleIntentSchema`'s seven-kind union, so an eighth kind added to the contract makes this
+ * function stop compiling ("lacks ending return statement") rather than silently falling through to
+ * a no-op at runtime. That is the whole reason widening the envelope is treated as a breaking
+ * change: see `packages/shared-types/src/intents.ts` and contract 0.4.0's history entry. A
+ * `default: throw` would swap a compile-time failure for a production one.
  */
-export async function applyTaskIntent(
+export async function applyScheduleIntent(
   exec: SqlExecutor,
   envelope: MutationIntentEnvelope,
-): Promise<ApplyTaskIntentResult> {
-  const changes = new ChangeSet();
+): Promise<ApplyScheduleIntentResult> {
+  const changes: TaskChangeSet = new ChangeSet<TaskDto>();
+  const links: DependencyChangeSet = new ChangeSet<Dependency>();
+
+  const taskResult = (task: TaskDto | null): ApplyScheduleIntentResult => ({
+    task,
+    dependency: null,
+    changes: changes.list(),
+    dependencyChanges: links.list(),
+  });
+  const linkResult = (dependency: Dependency | null): ApplyScheduleIntentResult => ({
+    task: null,
+    dependency,
+    changes: changes.list(),
+    dependencyChanges: links.list(),
+  });
 
   switch (envelope.intent.kind) {
     case 'createTask':
-      return { task: await applyCreate(exec, envelope, changes), changes: changes.list() };
+      return taskResult(await applyCreate(exec, envelope, changes));
     case 'updateTask':
-      return { task: await applyUpdate(exec, envelope, changes), changes: changes.list() };
+      return taskResult(await applyUpdate(exec, envelope, changes));
     case 'reparentTask':
-      return { task: await applyReparent(exec, envelope, changes), changes: changes.list() };
+      return taskResult(await applyReparent(exec, envelope, changes));
     case 'deleteTask':
-      return { task: await applyDelete(exec, envelope, changes), changes: changes.list() };
+      return taskResult(await applyDelete(exec, envelope, changes));
+    case 'createDependency':
+      return linkResult(await applyCreateDependency(exec, envelope, links));
+    case 'updateDependency':
+      return linkResult(await applyUpdateDependency(exec, envelope, links));
+    case 'deleteDependency':
+      return linkResult(await applyDeleteDependency(exec, envelope, links));
   }
 }

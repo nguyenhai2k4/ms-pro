@@ -47,15 +47,20 @@
  */
 
 /**
+ * 0.4.0 — **breaking**: `mutationIntentEnvelopeSchema.intent` is rebound from `taskIntentSchema`
+ * to `scheduleIntentSchema`, so the envelope now carries seven intent kinds rather than four. The
+ * type of an existing field widened, which is why this is a major-shaped bump and not an additive
+ * one: every consumer that switches on `envelope.intent.kind` must handle `createDependency`,
+ * `updateDependency` and `deleteDependency` or stop compiling. That failure is the point — it is
+ * how a new intent cannot reach a writer that has no case for it. Landed with the handler that
+ * satisfies it (P2 work item W2-2): `apps/api/src/routes/dependencies.ts` and the dependency arm
+ * of `apps/api/src/scheduler/rollup.ts`, whose entry point is renamed `applyTaskIntent` ->
+ * `applyScheduleIntent` in the same commit.
+ *
  * 0.3.0 — additive: `cpm.ts` in full, dependency intents, dependency and schedule DTOs. No
  * existing field changed meaning, so a consumer that ignores the new exports still compiles.
- *
- * One **deliberately deferred breaking change** is queued behind this: rebinding
- * `mutationIntentEnvelopeSchema.intent` from `taskIntentSchema` to `scheduleIntentSchema`. It
- * lands with the handler that satisfies it (P2 work item W2-2) and takes this to 0.4.0, because
- * it breaks `applyTaskIntent`'s exhaustive switch on purpose — see `intents.ts`.
  */
-export const CONTRACT_VERSION = '0.3.0' as const;
+export const CONTRACT_VERSION = '0.4.0' as const;
 
 export * from './primitives.js';
 export * from './enums.js';

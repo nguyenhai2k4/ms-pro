@@ -30,6 +30,47 @@ export interface AuditRecord {
   readonly after?: Record<string, unknown> | null;
 }
 
+/**
+ * What one mutation did to one row. The scheduler reports its work as a list of these
+ * (`ApplyScheduleIntentResult`), and `auditRecordsFor` turns them into audit rows mechanically.
+ */
+export interface EntityChange<T> {
+  readonly before: T | null;
+  readonly after: T | null;
+}
+
+/**
+ * Invariant 4 / FR-COL-07, the mapping half. Create has no `before`, delete has no `after`, update
+ * carries both — the same three cases the `audit_before_after_present` CHECK enforces in the
+ * database.
+ *
+ * Generic over the DTO rather than written once per entity: `routes/tasks.ts` and
+ * `routes/dependencies.ts` audit different rows in the same three shapes, and two hand-written
+ * copies of this mapping is how one of them ends up recording a delete with the deleted row's id
+ * and nothing else.
+ */
+export function auditRecordsFor<T extends { id: string }>(
+  entityType: AuditEntityType,
+  changes: readonly EntityChange<T>[],
+): AuditRecord[] {
+  return changes.map((change) => {
+    const entityId = (change.after ?? change.before)!.id;
+    if (change.before === null) {
+      return { entityType, entityId, action: 'create' as const, after: change.after };
+    }
+    if (change.after === null) {
+      return { entityType, entityId, action: 'delete' as const, before: change.before };
+    }
+    return {
+      entityType,
+      entityId,
+      action: 'update' as const,
+      before: change.before,
+      after: change.after,
+    };
+  });
+}
+
 export async function writeAuditEntry(
   exec: SqlExecutor,
   context: AuditContext,

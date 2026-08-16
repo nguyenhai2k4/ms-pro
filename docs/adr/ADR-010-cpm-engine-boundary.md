@@ -62,7 +62,7 @@ measurement. Reporting FR-SCH-06 as met end-to-end on P2 evidence would be repor
 number, and the risk register already flags this budget as the one most likely to slip.
 
 **5. P2 does not create `apps/scheduler`.**
-The engine is a pure package called in-process from `apps/api`, behind `applyTaskIntent` — the same
+The engine is a pure package called in-process from `apps/api`, behind `applyScheduleIntent` — the same
 single write path ADR-007 established, unchanged for callers. Splitting the process is P3 work,
 driven by the realtime hub's need for a stateful per-project owner, and doing it in P2 would add a
 deployment surface and an RPC contract to the phase whose risk is *algorithmic correctness*. The
@@ -95,7 +95,7 @@ without paying for a full schedule to answer a yes/no question.
   rather than papered over.
 - `apps/api/src/scheduler/rollup.ts`'s wall-clock date arithmetic and its per-row query pattern are
   **retired** in this phase, not patched — the risk register calls the per-row pattern out by name
-  as unable to hold the budget at CPM scale. The rollup's `applyTaskIntent` entry point and audit
+  as unable to hold the budget at CPM scale. The rollup's `applyScheduleIntent` entry point and audit
   change-set survive; its arithmetic does not.
 - Auditing (invariant 4) stays per-task-that-actually-moved, driven by `changedTaskIds`. A single
   edit that legitimately moves 5,000 tasks still writes 5,000 audit rows; that is correct but must
