@@ -51,7 +51,10 @@ interface SeededProject {
   readonly defaultCalendarId: string;
 }
 
-async function seedOrgAndUser(name: string, email: string): Promise<{ orgId: string; userId: string }> {
+async function seedOrgAndUser(
+  name: string,
+  email: string,
+): Promise<{ orgId: string; userId: string }> {
   const org = await exec.query<{ id: string }>(
     `INSERT INTO organization (name) VALUES ($1) RETURNING id`,
     [name],
@@ -104,9 +107,7 @@ async function insertTasks(
   const params: unknown[] = [];
   let p = 1;
   for (let i = 0; i < count; i += 1) {
-    values.push(
-      `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`,
-    );
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
     params.push(
       projectId,
       String(i + 1),
@@ -223,7 +224,7 @@ describe('loadCpmScheduleInput: shape', () => {
 });
 
 describe('loadCpmScheduleInput: cross-project isolation (FR-AUTH-04 read-side)', () => {
-  it('never returns another project\'s tasks, dependencies, or same-named calendar', async () => {
+  it("never returns another project's tasks, dependencies, or same-named calendar", async () => {
     const { orgId, userId } = await seedOrgAndUser('Acme', 'dana@acme.test');
     const projectA = await seedProject(orgId, userId, 'Mon-Fri');
     const projectB = await seedProject(orgId, userId, 'Mon-Fri'); // same calendar name, different id
@@ -257,7 +258,7 @@ describe('loadCpmScheduleInput: cross-project isolation (FR-AUTH-04 read-side)',
     expect(input.calendars.map((c) => c.id)).not.toContain(projectB.defaultCalendarId);
   });
 
-  it('a task calendar override naming another project\'s calendar id is simply absent, not resolved', async () => {
+  it("a task calendar override naming another project's calendar id is simply absent, not resolved", async () => {
     // Constructs the scenario the write path (`requireProjectCalendar`) is supposed to prevent
     // from ever being written, and proves the read path does not quietly paper over it by
     // resolving a foreign calendar id if one somehow ended up on a row.

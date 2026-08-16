@@ -43,7 +43,9 @@ beforeEach(async () => {
 });
 
 async function seedTasks(count: number): Promise<string[]> {
-  const org = await exec.query<{ id: string }>(`INSERT INTO organization (name) VALUES ('Acme') RETURNING id`);
+  const org = await exec.query<{ id: string }>(
+    `INSERT INTO organization (name) VALUES ('Acme') RETURNING id`,
+  );
   const user = await exec.query<{ id: string }>(
     `INSERT INTO app_user (org_id, name, email, auth_provider)
      VALUES ($1, 'Dana PM', 'dana@acme.test', 'password') RETURNING id`,
@@ -123,7 +125,9 @@ describe('bulkUpsertTaskSchedules', () => {
 
     expect(spy.count()).toBe(1);
 
-    const { rows } = await exec.query<{ count: string }>(`SELECT count(*)::text AS count FROM task_schedule`);
+    const { rows } = await exec.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM task_schedule`,
+    );
     expect(rows[0]!.count).toBe('500');
   });
 
@@ -133,9 +137,10 @@ describe('bulkUpsertTaskSchedules', () => {
       scheduleFor(taskId!, { totalFloatHours: -16, isCritical: false, hasScheduleConflict: true }),
     ]);
 
-    const { rows } = await exec.query<ScheduleRow>(`SELECT * FROM task_schedule WHERE task_id = $1`, [
-      taskId,
-    ]);
+    const { rows } = await exec.query<ScheduleRow>(
+      `SELECT * FROM task_schedule WHERE task_id = $1`,
+      [taskId],
+    );
     const row = rows[0]!;
     expect(row.total_float_hours).toBe(-16);
     expect(row.is_critical).toBe(false);
@@ -159,7 +164,9 @@ describe('bulkUpsertTaskSchedules', () => {
     );
     expect(spy.count()).toBe(1);
 
-    const { rows } = await exec.query<{ count: string }>(`SELECT count(*)::text AS count FROM task_schedule`);
+    const { rows } = await exec.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM task_schedule`,
+    );
     expect(rows[0]!.count).toBe('3');
 
     const updated = await exec.query<ScheduleRow>(
