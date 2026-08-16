@@ -317,6 +317,31 @@ async function loadSubtreeDeepestFirst(
   return rows;
 }
 
+/**
+ * FR-TSK-07 / FR-CAL-03: a per-task calendar override must be a calendar of *this* project.
+ *
+ * `task.calendar_id` is a bare `REFERENCES calendar (id)` — the database has no way to express
+ * "and it must belong to the same project", so without this check a caller could attach any
+ * calendar id in the installation to their own task. That is three defects at once: a dangling
+ * cross-tenant reference the P2 calendar-aware engine would then read from; an existence oracle
+ * (a real foreign id was accepted 201, an unused one hit the foreign key and rendered 500), which
+ * is exactly what FR-AUTH-04 forbids; and a 500 on ordinary bad input.
+ *
+ * `not_found`, not `forbidden`, for the same reason `routes/calendars.ts` uses it: distinguishing
+ * "exists but is not yours" from "does not exist" is the leak.
+ */
+async function requireProjectCalendar(
+  exec: SqlExecutor,
+  projectId: string,
+  calendarId: string,
+): Promise<void> {
+  const { rows } = await exec.query<{ id: string }>(
+    `SELECT id FROM calendar WHERE id = $1 AND project_id = $2`,
+    [calendarId, projectId],
+  );
+  if (rows[0] === undefined) throw notFound('Calendar not found');
+}
+
 /** True when `candidateId` is `taskId` itself or anywhere below it (FR-TSK-02 cycle rejection). */
 async function isSelfOrDescendant(
   exec: SqlExecutor,
@@ -503,6 +528,9 @@ async function applyCreate(
   const parent =
     intent.parentId === null ? null : await requireTask(exec, projectId, intent.parentId);
   assertNotMilestoneParent(parent);
+  if (intent.calendarId !== null) {
+    await requireProjectCalendar(exec, projectId, intent.calendarId);
+  }
 
   const { rows: projectRows } = await exec.query<{ start_date: Date | string }>(
     `SELECT start_date FROM project WHERE id = $1`,
@@ -651,6 +679,9 @@ async function applyUpdate(
   // rather than at its parent.
   merged.finish = new Date(Date.parse(merged.start) + MS(merged.durationHours)).toISOString();
   validateCandidate(merged);
+  if (has('calendarId') && merged.calendarId !== null) {
+    await requireProjectCalendar(exec, projectId, merged.calendarId);
+  }
 
   const { rows } = await exec.query<TaskRow>(
     `UPDATE task
