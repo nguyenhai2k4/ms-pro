@@ -268,6 +268,31 @@ export function registerCalendarRoutes(app: FastifyInstance, deps: AppDeps): voi
       if (!parsed.success) throw validationFailed(parsed.error.flatten());
       const body = parsed.data;
 
+      // FR-CAL-02: a half-day is a *range*, so it needs both ends and they must be in order.
+      // The DTO cannot express this (the two fields are independently nullable) and the database
+      // has no ordering CHECK on the override columns — only `BETWEEN 0 AND 1440` on each — so
+      // without this an inverted or half-supplied override persists and becomes a negative-length
+      // working window for the calendar-aware date math in P2. `CalendarDetail.tsx` refuses the
+      // same two shapes client-side; per invariant 3 that is UX, and this is the enforcement.
+      const startOverride = body.workingHoursStartMinuteOverride;
+      const endOverride = body.workingHoursEndMinuteOverride;
+      if ((startOverride === null) !== (endOverride === null)) {
+        throw validationFailed({
+          fieldErrors: {
+            workingHoursEndMinuteOverride: [
+              'provide both an override start and end minute for a half-day, or neither',
+            ],
+          },
+        });
+      }
+      if (startOverride !== null && endOverride !== null && endOverride <= startOverride) {
+        throw validationFailed({
+          fieldErrors: {
+            workingHoursEndMinuteOverride: ['must be greater than workingHoursStartMinuteOverride'],
+          },
+        });
+      }
+
       // Confirms the calendar belongs to this project before mutating (FR-AUTH-04).
       await loadCalendar(projectId, calendarId);
 
