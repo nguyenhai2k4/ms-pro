@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   constraintTypeSchema,
   calendarTemplateSchema,
+  dependencyTypeSchema,
   projectRoleSchema,
   scheduleModeSchema,
   taskStatusSchema,
@@ -10,18 +11,23 @@ import {
 import {
   calendarSchema,
   calendarExceptionSchema,
+  dependencySchema,
   organizationSchema,
   projectSchema,
   taskSchema,
   userSchema,
 } from './entities.js';
+import { cpmDiagnosticSchema } from './cpm.js';
 import { deleteTaskChildPolicySchema } from './intents.js';
+import { taskScheduleComputedSchema } from './schedule.js';
 import {
   calendarExceptionIdSchema,
   calendarIdSchema,
+  dependencyIdSchema,
   durationHoursSchema,
   isoDateSchema,
   isoDateTimeSchema,
+  lagHoursSchema,
   percentCompleteSchema,
   prioritySchema,
   projectIdSchema,
@@ -281,3 +287,74 @@ export type CalendarResponse = z.infer<typeof calendarResponseSchema>;
 /** FR-CAL-03: every calendar in the project, including the default and any resource/task overrides. */
 export const calendarListResponseSchema = z.object({ calendars: z.array(calendarSchema) });
 export type CalendarListResponse = z.infer<typeof calendarListResponseSchema>;
+
+// --------------------------------------------------------------------------------------------
+// Dependencies & computed schedule (FR-SCH-01..05, FR-SCH-10) — added at P2 entry
+// --------------------------------------------------------------------------------------------
+
+/**
+ * FR-SCH-01, FR-SCH-02. `projectId` travels in the URL like every other project-scoped route;
+ * both task ids are validated to belong to it server-side (FR-SCH-01 is same-project only, and
+ * FR-AUTH-04 requires a cross-project id to look like absence rather than like a permission error).
+ */
+export const createDependencyRequestSchema = z.object({
+  predecessorId: taskIdSchema,
+  successorId: taskIdSchema,
+  type: dependencyTypeSchema,
+  /** FR-SCH-02: signed working hours. Negative is lead. Defaulted so the common case is a bare link. */
+  lagHours: lagHoursSchema.default(0),
+});
+export type CreateDependencyRequest = z.infer<typeof createDependencyRequestSchema>;
+
+/** Retype or re-lag. Changing the endpoints is a delete plus a create — see `intents.ts`. */
+export const updateDependencyRequestSchema = z
+  .object({
+    type: dependencyTypeSchema.optional(),
+    lagHours: lagHoursSchema.optional(),
+  })
+  .refine((body) => body.type !== undefined || body.lagHours !== undefined, {
+    message: 'no fields to update',
+  });
+export type UpdateDependencyRequest = z.infer<typeof updateDependencyRequestSchema>;
+
+export const dependencyIdParamSchema = z.object({ dependencyId: dependencyIdSchema });
+
+export const dependencyResponseSchema = z.object({ dependency: dependencySchema });
+export type DependencyResponse = z.infer<typeof dependencyResponseSchema>;
+
+export const dependencyListResponseSchema = z.object({
+  dependencies: z.array(dependencySchema),
+});
+export type DependencyListResponse = z.infer<typeof dependencyListResponseSchema>;
+
+/**
+ * FR-SCH-03. The body of a `dependency_cycle` error (`http.ts` reserved the code and the
+ * `details.cyclePath` field in P0). Typed here so the client can render "A -> B -> C -> A" and
+ * highlight the offending arrows instead of showing a generic 409.
+ */
+export const dependencyCycleDetailsSchema = z.object({
+  cyclePath: z.array(taskIdSchema).min(2),
+  cycleDependencyIds: z.array(dependencyIdSchema).min(1),
+});
+export type DependencyCycleDetails = z.infer<typeof dependencyCycleDetailsSchema>;
+
+/**
+ * FR-SCH-04, FR-SCH-05, FR-SCH-10. The engine-derived analysis for a project, read-only: there is
+ * no PATCH counterpart and there never will be one, because float that can be set by hand is not
+ * float (`schedule.ts`). Served alongside `taskListResponseSchema` rather than merged into it so
+ * that the read-only-ness is visible in the URL, not just in a comment.
+ *
+ * `criticalDependencyIds` populates `GanttDependencyView.isCritical`, which has been in the Gantt
+ * contract since P0 with no data source until now.
+ */
+export const projectScheduleResponseSchema = z.object({
+  schedules: z.array(taskScheduleComputedSchema),
+  criticalDependencyIds: z.array(dependencyIdSchema),
+  projectFinish: isoDateTimeSchema,
+  /**
+   * FR-SCH-08 / FR-TSK-06 warnings the user needs to see. Error-severity diagnostics never reach
+   * this endpoint: they reject the mutation that caused them, so a stored schedule cannot hold one.
+   */
+  diagnostics: z.array(cpmDiagnosticSchema),
+});
+export type ProjectScheduleResponse = z.infer<typeof projectScheduleResponseSchema>;

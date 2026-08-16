@@ -1,9 +1,16 @@
 import { z } from 'zod';
-import { constraintTypeSchema, scheduleModeSchema, taskStatusSchema } from './enums.js';
+import {
+  constraintTypeSchema,
+  dependencyTypeSchema,
+  scheduleModeSchema,
+  taskStatusSchema,
+} from './enums.js';
 import {
   calendarIdSchema,
+  dependencyIdSchema,
   durationHoursSchema,
   isoDateTimeSchema,
+  lagHoursSchema,
   percentCompleteSchema,
   prioritySchema,
   projectIdSchema,
@@ -131,6 +138,86 @@ export const taskIntentSchema = z
     }
   });
 export type TaskIntent = z.infer<typeof taskIntentSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// Dependency intents (P2 — FR-SCH-01, FR-SCH-02, FR-SCH-03)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The widening this file predicted at P1 entry ("a subset of the eventual P2 set (which adds
+ * dependency ... shifts)"). A dependency edit is schedule-affecting, so by invariant 2 it has to
+ * reach the writer as an intent rather than as an `INSERT` in a route handler — otherwise there
+ * are two code paths that can move a task's dates and only one of them recomputes.
+ *
+ * FR-SCH-01 restricts a link to two tasks **in the same project**; `projectId` on the envelope is
+ * what that is checked against, and the check is the writer's, not this schema's — a zod refinement
+ * cannot see the tasks' projects.
+ */
+export const createDependencyIntentSchema = z
+  .object({
+    kind: z.literal('createDependency'),
+    projectId: projectIdSchema,
+    predecessorId: taskIdSchema,
+    successorId: taskIdSchema,
+    type: dependencyTypeSchema,
+    /** FR-SCH-02: signed working hours; negative is lead. */
+    lagHours: lagHoursSchema,
+  })
+  .strict()
+  .refine((intent) => intent.predecessorId !== intent.successorId, {
+    path: ['successorId'],
+    message: 'FR-SCH-03: a task cannot depend on itself (self-cycle)',
+  });
+export type CreateDependencyIntent = z.infer<typeof createDependencyIntentSchema>;
+
+/**
+ * Retype or re-lag an existing link. The endpoints are not editable: changing which tasks a link
+ * joins is a delete plus a create, because it is a different edge with a different blast radius
+ * and a different cycle check.
+ */
+export const updateDependencyIntentSchema = z
+  .object({
+    kind: z.literal('updateDependency'),
+    dependencyId: dependencyIdSchema,
+    type: dependencyTypeSchema.optional(),
+    lagHours: lagHoursSchema.optional(),
+  })
+  .strict()
+  .refine((intent) => intent.type !== undefined || intent.lagHours !== undefined, {
+    message: 'no fields to update',
+  });
+export type UpdateDependencyIntent = z.infer<typeof updateDependencyIntentSchema>;
+
+/** FR-SCH-04: removing a link is as schedule-affecting as adding one. */
+export const deleteDependencyIntentSchema = z
+  .object({
+    kind: z.literal('deleteDependency'),
+    dependencyId: dependencyIdSchema,
+  })
+  .strict();
+export type DeleteDependencyIntent = z.infer<typeof deleteDependencyIntentSchema>;
+
+export const dependencyIntentSchema = z.union([
+  createDependencyIntentSchema,
+  updateDependencyIntentSchema,
+  deleteDependencyIntentSchema,
+]);
+export type DependencyIntent = z.infer<typeof dependencyIntentSchema>;
+
+/**
+ * Every intent the P2 writer accepts.
+ *
+ * ## Why the envelope below is not bound to this yet
+ *
+ * Widening `mutationIntentEnvelopeSchema.intent` to include dependency intents is a **breaking**
+ * contract change on purpose: `applyTaskIntent`'s exhaustive `switch` stops compiling, which is
+ * the loud failure we want when a new intent has no writer. Landing that widening in the contract
+ * commit would leave `apps/api` red for the whole of P2's first wave, so the rebind happens in the
+ * *same commit as the handler that satisfies it* — see the P2 work breakdown, item W2-2. A contract
+ * that advertises a capability the writer does not have is worse than one that lands a wave late.
+ */
+export const scheduleIntentSchema = z.union([taskIntentSchema, dependencyIntentSchema]);
+export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
 /**
  * What travels from `apps/api` to the scheduler. `issuedAt` is the API's clock, not a client

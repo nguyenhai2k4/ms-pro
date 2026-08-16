@@ -9,14 +9,19 @@ import { durationHoursSchema, isoDateTimeSchema, taskIdSchema } from './primitiv
  * from the graph, never edited by a user. Modelling them as task columns invites someone to
  * PATCH `totalFloatHours`, and float that can be set by hand is not float.
  *
- * ## What is deliberately not here (scope boundary)
+ * ## Where the rest of the engine contract lives (updated at P2 entry)
  *
  * The full `cpm-engine` contract — the input graph shape, the recalculation result envelope, and
- * the incremental-recompute delta — is a **P2 entry deliverable**, owned by `tech-lead` with
- * `scheduler-engineer`, and it is not defined in P0. Nothing in P0 or P1 consumes it: the engine
- * does not exist until P2, so any shape written now would be an unvalidated guess that P2 rewrites.
- * What P0 needs, and all it needs, is the per-task projection below, because the Gantt view model
- * has to carry critical-path membership from the moment the adapter contract exists (FR-SCH-10).
+ * the incremental-recompute request/result — was a **P2 entry deliverable** and now lives in
+ * `cpm.ts` (ADR-010). It was not written in P0 because nothing in P0 or P1 consumed it: the engine
+ * did not exist until P2, so any shape written then would have been an unvalidated guess. What P0
+ * needed, and all it needed, is the per-task projection below, because the Gantt view model has to
+ * carry critical-path membership from the moment the adapter contract exists (FR-SCH-10).
+ *
+ * `CpmTaskSchedule` in `cpm.ts` extends this projection with the three fields that are persisted
+ * back onto the `task` row (`start`, `finish`, `durationHours`). The split is intentional: those
+ * three are task columns with an existing write path, these are engine-owned analysis that lands
+ * in its own table and is never PATCHable.
  *
  * Likewise the **mutation-intent envelope** (ADR-002) and the **WebSocket delta format** are P2/P3
  * entry deliverables. The one open question that forces the envelope earlier is recorded as a

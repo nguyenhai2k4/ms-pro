@@ -19,11 +19,23 @@
  * point of the monorepo, and it stops being true the moment something reads these types over a
  * network boundary without a version check.
  *
- * ## What is intentionally absent (as of P1 entry)
+ * ## What landed at P2 entry
  *
- *  - The `cpm-engine` input graph / output contract — a **P2 entry** deliverable.
- *  - The WebSocket delta format — a **P3 entry** deliverable.
- *  - Dependency, resource and reporting REST DTOs — **P2 and later**.
+ *  - `cpm.ts` — the `cpm-engine` input graph, result envelope and incremental-recompute
+ *    request/result (ADR-010), plus the engine's function signatures. The contract `schedule.ts`
+ *    and this file both named as deliberately absent since P0.
+ *  - Dependency intents in `intents.ts` and dependency + computed-schedule REST DTOs in `api.ts`.
+ *
+ * ## What is intentionally still absent (as of P2 entry)
+ *
+ *  - **The WebSocket delta format** — a **P3 entry** deliverable (FR-COL-01..04, ADR-002).
+ *    `CpmIncrementalResult.changedTaskIds` is the engine's "what moved"; wrapping it in a
+ *    sequenced, ack'd, presence-carrying wire message is a different contract with different
+ *    failure modes, and P2 opens no sockets.
+ *  - **Resource, baseline, reporting and import REST DTOs** — P4 and later.
+ *  - **Backward scheduling from a deadline** — FR-SCH-09 tags it P2 in the FRS's *product-phase*
+ *    sense, which is not the P2 roadmap phase. `CpmScheduleDirection` leaves room for it without
+ *    pretending to have it.
  *
  * These are absent on purpose. Nothing before their owning phase consumes them, and a contract
  * written a phase ahead of its first consumer gets rewritten rather than built against.
@@ -34,7 +46,16 @@
  * exists, so the envelope is what `apps/api`'s in-process P1 scheduler is built against instead.
  */
 
-export const CONTRACT_VERSION = '0.2.0' as const;
+/**
+ * 0.3.0 — additive: `cpm.ts` in full, dependency intents, dependency and schedule DTOs. No
+ * existing field changed meaning, so a consumer that ignores the new exports still compiles.
+ *
+ * One **deliberately deferred breaking change** is queued behind this: rebinding
+ * `mutationIntentEnvelopeSchema.intent` from `taskIntentSchema` to `scheduleIntentSchema`. It
+ * lands with the handler that satisfies it (P2 work item W2-2) and takes this to 0.4.0, because
+ * it breaks `applyTaskIntent`'s exhaustive switch on purpose — see `intents.ts`.
+ */
+export const CONTRACT_VERSION = '0.3.0' as const;
 
 export * from './primitives.js';
 export * from './enums.js';
@@ -43,6 +64,7 @@ export * from './rbac.js';
 export * from './http.js';
 export * from './api.js';
 export * from './schedule.js';
+export * from './cpm.js';
 export * from './intents.js';
 
 /**
