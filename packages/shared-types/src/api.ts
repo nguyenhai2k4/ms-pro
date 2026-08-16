@@ -4,6 +4,7 @@ import {
   calendarTemplateSchema,
   projectRoleSchema,
   scheduleModeSchema,
+  taskStatusSchema,
   weekdaySchema,
 } from './enums.js';
 import {
@@ -197,7 +198,10 @@ export const updateTaskRequestSchema = z
     actualStart: isoDateTimeSchema.nullable().optional(),
     actualFinish: isoDateTimeSchema.nullable().optional(),
     notes: z.string().optional(),
-    status: z.enum(['not_started', 'in_progress', 'blocked', 'done']).optional(),
+    // `taskStatusSchema`, not a second inline copy of the same four values: `packages/db`'s
+    // schema test pins the database enum against `enums.ts` only, so a re-listed vocabulary here
+    // would drift out of both without failing anything.
+    status: taskStatusSchema.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, { message: 'no fields to update' });
 export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>;

@@ -98,7 +98,10 @@ export function CalendarSettings({
                     <button
                       type="button"
                       aria-expanded={isSelected}
-                      aria-controls={`calendar-detail-${calendar.id}`}
+                      // Only while the panel is actually in the document: `aria-controls` naming
+                      // an id that does not exist is an invalid reference, and a screen reader
+                      // that follows it lands nowhere (WCAG 4.1.2).
+                      aria-controls={isSelected ? `calendar-detail-${calendar.id}` : undefined}
                       onClick={() => setSelectedCalendarId(isSelected ? null : calendar.id)}
                     >
                       {isSelected

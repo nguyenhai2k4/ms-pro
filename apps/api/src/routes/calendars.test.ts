@@ -655,3 +655,281 @@ describe('FR-COL-07 / invariant 4: calendar mutations are audited', () => {
     expect(after).toHaveLength(before.length);
   });
 });
+
+// ------------------------------------------------------------------------------------------
+// P1 review additions.
+// ------------------------------------------------------------------------------------------
+
+describe('FR-CAL-02: a half-day override is validated server-side, not only in the browser', () => {
+  async function addException(f: Fixture, payload: Record<string, unknown>) {
+    return app.inject({
+      method: 'POST',
+      url: `/projects/${f.projectId}/calendars/${f.calendarId}/exceptions`,
+      headers: { authorization: `Bearer ${f.adminToken}` },
+      payload,
+    });
+  }
+
+  it('rejects an override whose end minute is not after its start minute', async () => {
+    const f = await fixture();
+    const response = await addException(f, {
+      date: '2026-12-24',
+      isWorking: true,
+      workingHoursStartMinuteOverride: 720,
+      workingHoursEndMinuteOverride: 540,
+    });
+    expect(response.statusCode, response.body).toBe(422);
+    expect(response.json().code).toBe('validation_failed');
+
+    const { rows } = await exec.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM calendar_exception WHERE calendar_id = $1`,
+      [f.calendarId],
+    );
+    expect(rows[0]!.count).toBe('0');
+  });
+
+  it('rejects an override that supplies only one of the two ends', async () => {
+    const f = await fixture();
+    for (const half of [
+      { workingHoursStartMinuteOverride: 540 },
+      { workingHoursEndMinuteOverride: 720 },
+    ]) {
+      const response = await addException(f, {
+        date: '2026-12-24',
+        isWorking: true,
+        ...half,
+      });
+      expect(response.statusCode, `${JSON.stringify(half)}: ${response.body}`).toBe(422);
+    }
+  });
+
+  it('still accepts a holiday (no overrides) and a well-formed half-day', async () => {
+    const f = await fixture();
+    expect((await addException(f, { date: '2026-12-25', isWorking: false })).statusCode).toBe(201);
+    expect(
+      (
+        await addException(f, {
+          date: '2026-12-24',
+          isWorking: true,
+          workingHoursStartMinuteOverride: 540,
+          workingHoursEndMinuteOverride: 720,
+        })
+      ).statusCode,
+    ).toBe(201);
+  });
+
+  it('does not audit a refused exception', async () => {
+    const f = await fixture();
+    const before = await auditRowsFor(f.projectId, f.calendarId);
+    await addException(f, {
+      date: '2026-12-24',
+      isWorking: true,
+      workingHoursStartMinuteOverride: 720,
+      workingHoursEndMinuteOverride: 540,
+    });
+    expect(await auditRowsFor(f.projectId, f.calendarId)).toHaveLength(before.length);
+  });
+});
+
+describe('FR-COL-07: an exception audit row carries the exception, not just the fact of a change', () => {
+  /**
+   * Wave 1b modelled exception add/remove as an `update` on the owning calendar rather than as a
+   * `calendar_exception` entity of its own — reasonable, since `audit_entity_type` has no
+   * `calendar_exception` member and adding one is an FRS change, not a code change. What that
+   * modelling must not do is lose the exception's own before/after: "calendar changed somehow" is
+   * not an audit trail. These assertions pin the payload, which the original suite only checked
+   * for non-nullness.
+   */
+  it('records which exception was added and which was removed', async () => {
+    const f = await fixture();
+
+    const created = await app.inject({
+      method: 'POST',
+      url: `/projects/${f.projectId}/calendars/${f.calendarId}/exceptions`,
+      headers: { authorization: `Bearer ${f.adminToken}` },
+      payload: { date: '2026-12-25', isWorking: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const exceptionId = created.json().exception.id as string;
+
+    const afterAdd = await auditRowsFor(f.projectId, f.calendarId);
+    expect(afterAdd).toHaveLength(1);
+    const added = afterAdd[0]!.after_json as {
+      exceptionAdded: boolean;
+      exception: { id: string; date: string; isWorking: boolean };
+    };
+    expect(added.exceptionAdded).toBe(true);
+    expect(added.exception.id).toBe(exceptionId);
+    expect(added.exception.date).toBe('2026-12-25');
+    expect(added.exception.isWorking).toBe(false);
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/projects/${f.projectId}/calendars/${f.calendarId}/exceptions/${exceptionId}`,
+      headers: { authorization: `Bearer ${f.adminToken}` },
+    });
+    expect(removed.statusCode).toBe(204);
+
+    const afterRemove = await auditRowsFor(f.projectId, f.calendarId);
+    expect(afterRemove).toHaveLength(2);
+    // The before-image of a removal is the row that is about to disappear — the only place it
+    // survives once the DELETE has run.
+    const gone = afterRemove[1]!.before_json as {
+      exception: { id: string; date: string };
+    };
+    expect(gone.exception.id).toBe(exceptionId);
+    expect(gone.exception.date).toBe('2026-12-25');
+  });
+});
+
+describe('FR-AUTH-04: calendar routes are not an id oracle for a caller in another organization', () => {
+  it('answers 404 for a calendar in another organization, exactly as for a project that does not exist', async () => {
+    const insider = await register('dana@acme.test', 'Acme Construction');
+    const insiderProject = await createProject(insider.token);
+    const insiderCalendar = await defaultCalendarId(insiderProject, insider.token);
+
+    // A separate tenant entirely — `register` creates its own organization.
+    const outsider = await register('evan@other.test', 'Other Incorporated');
+
+    const real = await app.inject({
+      method: 'PATCH',
+      url: `/projects/${insiderProject}/calendars/${insiderCalendar}`,
+      headers: { authorization: `Bearer ${outsider.token}` },
+      payload: { name: 'Hijacked' },
+    });
+    const ghost = await app.inject({
+      method: 'PATCH',
+      url: `/projects/00000000-0000-4000-8000-000000000000/calendars/${insiderCalendar}`,
+      headers: { authorization: `Bearer ${outsider.token}` },
+      payload: { name: 'Hijacked' },
+    });
+
+    // `forbidden` here would confirm that the project (and so the organization) exists.
+    expect(real.statusCode).toBe(404);
+    expect(real.json().code).toBe(ghost.json().code);
+    expect(real.json().message).toBe(ghost.json().message);
+
+    // And nothing changed.
+    const check = await app.inject({
+      method: 'GET',
+      url: `/projects/${insiderProject}/calendars/${insiderCalendar}`,
+      headers: { authorization: `Bearer ${insider.token}` },
+    });
+    expect(check.json().calendar.name).not.toBe('Hijacked');
+  });
+});
+
+describe('FR-CAL-04: the regional template is regional in name only', () => {
+  /**
+   * FR-CAL-04 asks for "regional calendar templates (e.g. US, and a generic Mon-Fri)". What makes
+   * the US template regional is its holiday set, not its weekly pattern — and
+   * `apps/api/src/calendars.ts` says so itself: the US holidays "land with the calendar work in
+   * P1". P1 built the mechanism (FR-CAL-02 exceptions) and never populated the template with it,
+   * so `us` and `mon_fri` are byte-identical apart from the display name.
+   *
+   * Pinned with `it.fails` rather than left silent, matching how P0's known defects are recorded:
+   * which holidays, on which observed-date rule, and over what year range is a product decision
+   * for tech-lead, not something a test author should invent.
+   */
+  it.fails('KNOWN GAP: the us template ships no US holidays, so it equals mon_fri', async () => {
+    const admin = await register('dana@acme.test', 'Acme Construction');
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/projects',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        name: 'US project',
+        startDate: '2026-09-01T08:00:00.000Z',
+        calendarTemplate: 'us',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const projectId = created.json().project.id as string;
+    const calendarId = created.json().project.calendarId as string;
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/projects/${projectId}/calendars/${calendarId}`,
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+    // A US regional calendar with no non-working exceptions is not a regional calendar.
+    expect(
+      detail.json().exceptions.length,
+      'FR-CAL-04: the us template carries no holiday exceptions',
+    ).toBeGreaterThan(0);
+  });
+
+  it('documents the current behaviour: us and mon_fri differ only by display name', async () => {
+    const admin = await register('dana@acme.test', 'Acme Construction');
+    const shapes: Array<Record<string, unknown>> = [];
+
+    for (const calendarTemplate of ['mon_fri', 'us'] as const) {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/projects',
+        headers: { authorization: `Bearer ${admin.token}` },
+        payload: {
+          name: `Project ${calendarTemplate}`,
+          startDate: '2026-09-01T08:00:00.000Z',
+          calendarTemplate,
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/projects/${created.json().project.id}/calendars/${created.json().project.calendarId}`,
+        headers: { authorization: `Bearer ${admin.token}` },
+      });
+      const { calendar, exceptions } = detail.json();
+      shapes.push({
+        workingDays: calendar.workingDays,
+        workingHoursStartMinute: calendar.workingHoursStartMinute,
+        workingHoursEndMinute: calendar.workingHoursEndMinute,
+        exceptionCount: exceptions.length,
+      });
+    }
+
+    expect(shapes[0]).toEqual(shapes[1]);
+  });
+});
+
+describe('FR-CAL-01: a project keeps exactly one default calendar', () => {
+  it('never lets the create endpoint mint a second default', async () => {
+    const f = await fixture();
+
+    const created = await app.inject({
+      method: 'POST',
+      url: `/projects/${f.projectId}/calendars`,
+      headers: { authorization: `Bearer ${f.adminToken}` },
+      payload: {
+        name: 'Tries to be default',
+        workingDays: [1, 2, 3, 4, 5],
+        workingHoursStartMinute: 540,
+        workingHoursEndMinute: 1020,
+        // `isDefault` is not in the DTO; sending it must not smuggle a value through.
+        isDefault: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().calendar.isDefault).toBe(false);
+
+    const { rows } = await exec.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM calendar WHERE project_id = $1 AND is_default`,
+      [f.projectId],
+    );
+    expect(rows[0]!.count).toBe('1');
+  });
+
+  it('keeps the default flag when the default calendar is edited', async () => {
+    const f = await fixture();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/projects/${f.projectId}/calendars/${f.calendarId}`,
+      headers: { authorization: `Bearer ${f.adminToken}` },
+      payload: { name: 'Renamed default', isDefault: false },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().calendar.isDefault).toBe(true);
+  });
+});
