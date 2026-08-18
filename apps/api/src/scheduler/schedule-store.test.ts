@@ -132,9 +132,13 @@ describe('bulkUpsertTaskSchedules', () => {
   });
 
   it('persists every column correctly, including a negative float', async () => {
+    // isCritical: true here on purpose, matching FR-SCH-05 v1.2 (float <= 0 is critical, not just
+    // === 0 — docs/FRS.md's phase-entry amendment). The store itself derives nothing; it persists
+    // whatever the engine computed, so this is only an example of a valid engine output, not a
+    // claim the store enforces the rule.
     const [taskId] = await seedTasks(1);
     await bulkUpsertTaskSchedules(exec, '2026-09-01T09:00:00.000Z', [
-      scheduleFor(taskId!, { totalFloatHours: -16, isCritical: false, hasScheduleConflict: true }),
+      scheduleFor(taskId!, { totalFloatHours: -16, isCritical: true, hasScheduleConflict: true }),
     ]);
 
     const { rows } = await exec.query<ScheduleRow>(
@@ -143,7 +147,7 @@ describe('bulkUpsertTaskSchedules', () => {
     );
     const row = rows[0]!;
     expect(row.total_float_hours).toBe(-16);
-    expect(row.is_critical).toBe(false);
+    expect(row.is_critical).toBe(true);
     expect(row.has_schedule_conflict).toBe(true);
     expect(new Date(row.computed_at).toISOString()).toBe('2026-09-01T09:00:00.000Z');
   });
