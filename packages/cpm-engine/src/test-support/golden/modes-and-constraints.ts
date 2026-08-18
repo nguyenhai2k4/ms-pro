@@ -3,9 +3,9 @@ import type { GoldenFixture } from './common.js';
 import { metrics, scheduled, scheduleInput, taskSchedule } from './common.js';
 
 /**
- * Golden fixtures F07-F15 — scheduling mode (FR-TSK-05), summary rollup inside a mixed subtree
- * (FR-TSK-03), the manual-conflict flag (FR-SCH-08), and one fixture per constraint type
- * (FR-TSK-06).
+ * Golden fixtures F07-F15 and F20 — scheduling mode (FR-TSK-05), summary rollup inside a mixed
+ * subtree (FR-TSK-03), the manual-conflict flag (FR-SCH-08), one fixture per constraint type
+ * (FR-TSK-06), and what a manual task hands to its successors (F20, ESC-6).
  *
  * Same working-time frame as F01-F06: Mon-Fri 08:00-16:00 UTC, project start Monday
  * 2026-09-07T08:00Z, derivations in working hours since the project start (`wh`). `common.ts`
@@ -34,8 +34,8 @@ import { metrics, scheduled, scheduleInput, taskSchedule } from './common.js';
  *
  * MSO/MFO/SNLT/FNLT are the four that can be *violated*; `cpm.ts` specifies the response — schedule
  * anyway, let float go negative, emit a `constraint_violation` **warning** and set
- * `hasScheduleConflict`. F12 is the corpus's violated case. See ESC-4: whether a negative-float
- * task counts as critical is contested, and F12 follows the contract's literal `float === 0`.
+ * `hasScheduleConflict`. F12 is the corpus's violated case, and its negative-float tasks are
+ * **critical**: FR-SCH-05 reads `Float <= 0` since docs/FRS.md v1.2 (ESC-4).
  */
 
 // =============================================================================================
@@ -58,11 +58,13 @@ import { metrics, scheduled, scheduleInput, taskSchedule } from './common.js';
  * Careful: the parent of t2 and t3 is t1; t4 and t5 are top level. Dependencies only ever touch
  * leaves — a dependency on a summary task is a separate question the corpus does not answer.
  *
- * **The manual dates were chosen to coincide exactly with the graph-implied dates.** That is
- * deliberate: whether a successor of a manual task schedules from the manual finish or from the
- * graph-implied early finish is unresolved (ESC-6), and here both readings give the same answer for
- * t5, so this fixture does not smuggle in a decision. F08 covers the conflicted case, and it has no
- * successor for the same reason.
+ * **The manual dates were chosen to coincide exactly with the graph-implied dates**, so t5's start
+ * is the same instant whether a successor of a manual task schedules from the manual finish or from
+ * the graph-implied early finish. That was originally to avoid pre-empting ESC-6; the ruling has
+ * since gone to the manual finish, and **F20** is the fixture that discriminates the two. This one
+ * keeps its coinciding dates on purpose: it is about the rollup and about a manual task landing on
+ * the critical path, and it should stay insensitive to the successor rule so that a failure here
+ * localises to the rollup.
  *
  * Forward pass (wh):
  * ```
@@ -79,18 +81,26 @@ import { metrics, scheduled, scheduleInput, taskSchedule } from './common.js';
  *   t2 M  FS to t5          LF = t5.LS = 24               LS = 24 - 16 =  8
  *   t3 U  no successor      LF = 32                       LS = 32 - 8  = 24
  *   t4 X  LF = min(t2.LS, t3.LS) = min(8, 24) = 8         LS =  8 - 8  =  0
- *   t1 P  rollup (ESC-2):   LS = min(8, 24) = 8           LF = max(24, 32) = 32
  * ```
- * Float = LS - ES: X `0-0=0`, M `8-8=0` (**critical, and manual** — FR-TSK-05), U `24-8=16`,
- * Z `24-24=0`, P `8-8=0`.
+ * Float = LS - ES on the leaves: X `0-0=0`, M `8-8=0` (**critical, and manual** — FR-TSK-05),
+ * U `24-8=16`, Z `24-24=0`.
+ *
+ * Summary t1 P, over its direct children t2 M (float 0) and t3 U (float 16), by the ESC-2 rule
+ * (`common.ts`, "Summary tasks: rollup and late dates"):
+ * ```
+ *   ES = min(child ES) = min( 8,  8) =  8        EF = max(child EF) = max(24, 16) = 24
+ *   float = min(child float) = min(0, 16) = 0
+ *   LS = ES + float =  8 + 0 =  8                LF = EF + float = 24 + 0 = 24
+ * ```
+ * So P inherits float 0 from its critical manual child and is itself critical — which is the whole
+ * reason the corpus's first rule (`LS = min(child LS)`, `LF = max(child LF)`) was overruled. Under
+ * it, P's LF was wh **32**: 8 working hours later than its own early finish while reporting float 0,
+ * so `LF - EF` and `totalFloatHours` disagreed on the same row. Here they agree, and they agree
+ * exactly: `LF - EF = LS - ES = float = 0`.
  *
  * Rolled-up values for t1: start = min(child start) = wh 8, finish = max(child finish) = wh 24,
  * durationHours = the working-hour span wh 8 -> wh 24 = **16** (FR-SCH-07: working hours, not the
  * wall-clock span, which would have been 32).
- *
- * Note t1's `lateFinish` (wh 32) is later than its `earlyFinish` (wh 24) by 8 while its float is 0.
- * That is the documented consequence of ESC-2, not an arithmetic slip: a summary's LF is the max
- * over children whose floats differ.
  */
 export const F07_MIXED_MANUAL_AUTO_SUBTREE: GoldenFixture = {
   id: 'F07-mixed-manual-auto-subtree',
@@ -120,9 +130,9 @@ export const F07_MIXED_MANUAL_AUTO_SUBTREE: GoldenFixture = {
       taskSchedule(1, {
         es: '2026-09-08T08:00:00.000Z', // wh 8  = min(child ES)
         ef: '2026-09-09T16:00:00.000Z', // wh 24 = max(child EF)
-        ls: '2026-09-08T08:00:00.000Z', // wh 8  = min(child LS)
-        lf: '2026-09-10T16:00:00.000Z', // wh 32 = max(child LF)  — see ESC-2
-        floatHours: 0,
+        ls: '2026-09-08T08:00:00.000Z', // wh 8  = ES + float = 8 + 0   — ESC-2
+        lf: '2026-09-09T16:00:00.000Z', // wh 24 = EF + float = 24 + 0  — ESC-2
+        floatHours: 0, // = min(child float) = min(t2 0, t3 16)
         durationHours: 16, // working-hour span wh 8 -> wh 24
       }),
       taskSchedule(2, {
@@ -505,9 +515,17 @@ export const F11_SNET: GoldenFixture = {
  * extends backwards for it: wh -8 = Friday 2026-09-04 08:00Z, and 16 working hours from there
  * (8 on Fri 09-04, 8 on Mon 09-07) reaches LF = wh 8 = Monday 09-07 16:00Z.
  *
- * `isCritical` is **false** on both tasks — see ESC-4. This is the one fixture in the corpus whose
- * expectation flips if the tech-lead rules that float <= 0 is critical, and it is called out here so
- * that flip is a one-line edit rather than an archaeology exercise.
+ * `isCritical` is **true** on both tasks. Float -8 is not zero, and the corpus originally read
+ * FR-SCH-05's "Float = 0" literally and reported both as non-critical; ESC-4 was raised against
+ * exactly that, and docs/FRS.md v1.2 tightened the requirement to `Float <= 0`. On this fixture the
+ * literal reading marked **nothing** critical on a project that is already late — FR-SCH-10 would
+ * have had no path to highlight at the moment a user most needs one — and t1 -> t2 is plainly the
+ * chain driving the overrun. The flag is derived in `taskSchedule()`, so this fixture states the
+ * float and the ruling supplies the rest; the change was one line in `common.ts`.
+ *
+ * Both endpoints of d1 are now critical and the edge is driving (t2.ES = t1.EF exactly), so d1 is a
+ * critical dependency. `criticalDependencyIds` was `[]` under the old reading — that emptiness on an
+ * over-constrained project is the same bug seen from the edge side.
  *
  * `hasScheduleConflict` is set on t2 only: the flag marks the task carrying the unsatisfiable
  * constraint, not everything the violation propagates through.
@@ -548,7 +566,8 @@ export const F12_SNLT_VIOLATED: GoldenFixture = {
         conflict: true,
       }),
     ],
-    criticalDependencyIds: [],
+    // Both endpoints critical (float -8 <= 0, ESC-4) and the edge is driving: t2.ES == t1.EF.
+    criticalDependencyIds: [dependencyId(1)],
     projectFinish: '2026-09-09T16:00:00.000Z',
     diagnostics: [
       {
@@ -813,5 +832,129 @@ export const F15_ALAP: GoldenFixture = {
     criticalDependencyIds: [dependencyId(2)],
     projectFinish: '2026-09-10T16:00:00.000Z',
     metrics: metrics({ tasks: 3, edges: 2, depth: 2 }),
+  }),
+};
+
+// =============================================================================================
+// F20 — a manual task's successor schedules from the MANUAL finish (ESC-6)
+// =============================================================================================
+/**
+ * The fixture ESC-6 asked for. `cpm.ts` gives a manual task two finishes: `finish`, the user's fixed
+ * date, and `earlyFinish`, "where the graph would have put it". A successor has to pick one, and
+ * neither the FRS nor the contract said which — so the corpus originally sidestepped the question
+ * (F07's manual dates coincide with the graph-implied ones; F08's manual task has no successor) and
+ * escalated instead of guessing. **Ruled: the manual finish.** The manual dates are the commitment
+ * the user made; a successor that quietly scheduled off the early finish would be planning against
+ * a date nobody agreed to, which makes manual mode useless for anything downstream of it.
+ *
+ * This fixture is built so the two readings give **different literals**, which is the only reason it
+ * is worth committing:
+ *
+ * ```
+ *   t1 A  auto,   8h
+ *   t2 M  manual, 4h, fixed 2026-09-10T08:00Z .. 2026-09-10T12:00Z  = wh 24 .. 28
+ *   t3 Z  auto,   8h
+ *   edges: d1 A -FS+0-> M,  d2 M -FS+0-> Z
+ * ```
+ *
+ * Forward pass (wh):
+ * ```
+ *   t1 A  ES = 0                              EF =  0 + 8 =  8
+ *   t2 M  graph-implied ES = t1.EF = 8        EF =  8 + 4 = 12
+ *         fixed start wh 24 >= 8, so nothing is violated: no conflict, no diagnostic (contrast F08,
+ *         where the fixed start is EARLIER than the predecessor's finish). Dates stay wh 24..28 and
+ *         ES/EF keep reporting wh 8..12.
+ *   t3 Z  ES = t2.FINISH = 24 + 4 = 28        EF = 28 + 8 = 36
+ *   projectFinish = max(EF) = max(8, 12, 36) = 36
+ * ```
+ *
+ * **t3's ES is the whole fixture.** Under the ruling it is wh 28 = `2026-09-10T12:00Z`, the same
+ * instant as t2's manual finish, to the minute. Under the rejected reading it would have been t2's
+ * graph-implied `earlyFinish`, wh 12 = `2026-09-08T12:00Z` — two calendar days earlier, and the
+ * project would have finished at wh 20 instead of 36. Both instants sit at midday, inside a working
+ * window, so neither depends on the day-boundary convention: an implementation cannot land on the
+ * right answer by rounding.
+ *
+ * Backward pass (wh):
+ * ```
+ *   t3 Z  no successor         LF = 36                     LS = 36 - 8 = 28
+ *   t2 M  FS to t3             LF = t3.LS = 28             LS = 28 - 4 = 24
+ *   t1 A  FS to t2             LF = t2.LS = 24             LS = 24 - 8 = 16
+ * ```
+ * Float = LS - ES: A `16-0=16`, M `24-8=16`, Z `28-28=0`.
+ *
+ * A manual task's LS/LF are **derived from its successors like anyone else's**, not pinned to its
+ * manual dates — F08 already committed to that (its manual task's fixed dates are wh 8..16 while its
+ * LS/LF are wh 24..32), and this fixture follows it rather than re-opening it. Here the two happen
+ * to coincide, at wh 24..28, because t3 is critical and starts exactly at t2's manual finish. That
+ * coincidence is deliberate: F20's job is to pin the *forward* question ESC-6 asked, and it should
+ * not also be the fixture that decides a backward-pass rule by accident.
+ *
+ * Note the shape of the result: t2 drives the project finish yet is not critical, because float is
+ * `LS - ES` and its ES is where the *graph* would have started it (wh 8), 16 hours before the date
+ * the user pinned. That is the same ES/EF-versus-start/finish split F08 and F15 (ALAP) show, seen
+ * from the successor side. It also empties `criticalDependencyIds`: d2's predecessor t2 is not
+ * critical, so the driving edge is not a critical one. Discomfort with that is a legitimate question
+ * about how manual dates should interact with float — but it is FR-TSK-05's semantics as `cpm.ts`
+ * already specifies them, not something this fixture invents.
+ *
+ * Dates: wh 8 -> Tue 09-08 08:00 (start) / Mon 09-07 16:00 (finish), wh 12 -> Tue 09-08 12:00,
+ * wh 16 -> Wed 09-09 08:00 (start), wh 24 -> Thu 09-10 08:00 (start) / Wed 09-09 16:00 (finish),
+ * wh 28 -> Thu 09-10 12:00, wh 36 -> Fri 09-11 12:00.
+ */
+export const F20_MANUAL_FINISH_DRIVES_SUCCESSOR: GoldenFixture = {
+  id: 'F20-manual-finish-drives-successor',
+  proves:
+    'A successor of a manual task starts from the manual task’s fixed finish, not from the graph-implied earlyFinish it reports alongside it (ESC-6).',
+  requirements: ['FR-TSK-05', 'FR-SCH-01', 'FR-SCH-04', 'FR-SCH-05'],
+  input: scheduleInput({
+    tasks: [
+      makeTask(1, { durationHours: 8 }),
+      makeTask(2, {
+        durationHours: 4,
+        scheduleMode: 'manual',
+        // Chosen so the manual finish (wh 28) and the graph-implied earlyFinish (wh 12) are
+        // different instants — a manual task pinned to its graph dates proves nothing here.
+        manualStart: '2026-09-10T08:00:00.000Z', // wh 24
+        manualFinish: '2026-09-10T12:00:00.000Z', // wh 28
+      }),
+      makeTask(3, { durationHours: 8 }),
+    ],
+    dependencies: [makeDependency(1, 1, 2), makeDependency(2, 2, 3)],
+  }),
+  expected: scheduled({
+    taskSchedules: [
+      taskSchedule(1, {
+        es: '2026-09-07T08:00:00.000Z', // wh 0
+        ef: '2026-09-07T16:00:00.000Z', // wh 8
+        ls: '2026-09-09T08:00:00.000Z', // wh 16
+        lf: '2026-09-09T16:00:00.000Z', // wh 24
+        floatHours: 16,
+        durationHours: 8,
+      }),
+      taskSchedule(2, {
+        es: '2026-09-08T08:00:00.000Z', // wh 8  — where the graph would have put it
+        ef: '2026-09-08T12:00:00.000Z', // wh 12
+        ls: '2026-09-10T08:00:00.000Z', // wh 24
+        lf: '2026-09-10T12:00:00.000Z', // wh 28
+        floatHours: 16,
+        start: '2026-09-10T08:00:00.000Z', // the user's fixed dates (FR-TSK-05), unmoved
+        finish: '2026-09-10T12:00:00.000Z',
+        durationHours: 4,
+      }),
+      taskSchedule(3, {
+        // wh 28 — t2's *manual* finish to the minute, not its earlyFinish (wh 12). ESC-6.
+        es: '2026-09-10T12:00:00.000Z',
+        ef: '2026-09-11T12:00:00.000Z', // wh 36
+        ls: '2026-09-10T12:00:00.000Z',
+        lf: '2026-09-11T12:00:00.000Z',
+        floatHours: 0,
+        durationHours: 8,
+      }),
+    ],
+    // d2 drives the project finish but its predecessor t2 has float 16, so no edge qualifies.
+    criticalDependencyIds: [],
+    projectFinish: '2026-09-11T12:00:00.000Z',
+    metrics: metrics({ tasks: 3, edges: 2, depth: 3 }),
   }),
 };

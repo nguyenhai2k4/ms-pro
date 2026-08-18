@@ -17,7 +17,7 @@ import { detectCycle } from './cycle.js';
 import { buildGraph } from './graph.js';
 import { topologicalOrder } from './topological-order.js';
 import type { GoldenFixture } from './test-support/golden/index.js';
-import { F19_CYCLE_REJECTED, GOLDEN_FIXTURES } from './test-support/golden/index.js';
+import { ESCALATIONS, F19_CYCLE_REJECTED, GOLDEN_FIXTURES } from './test-support/golden/index.js';
 
 /**
  * The golden corpus's own test suite.
@@ -217,6 +217,48 @@ describe('the golden corpus is complete enough to be worth having', () => {
     expect(codes.has('manual_conflict'), 'FR-SCH-08').toBe(true);
     expect(codes.has('constraint_violation'), 'FR-TSK-06').toBe(true);
   });
+
+  it('discriminates a manual task’s finish from its graph-implied earlyFinish (ESC-6)', () => {
+    // The ruling is only pinned if some fixture would give a *different* answer under the other
+    // reading. A manual task whose fixed dates coincide with the graph-implied ones — F07 — cannot
+    // do that, so assert the discriminating shape exists rather than trusting F20's comment.
+    const discriminating = SCHEDULED.some((fixture) =>
+      fixture.input.dependencies.some((edge) => {
+        const predecessor = taskById(fixture.input, edge.predecessorId);
+        if (predecessor?.scheduleMode !== 'manual') return false;
+        const row = fixture.expected.taskSchedules.find((r) => r.taskId === edge.predecessorId);
+        const successor = fixture.expected.taskSchedules.find((r) => r.taskId === edge.successorId);
+        if (row === undefined || successor === undefined) return false;
+        return (
+          edge.type === 'FS' &&
+          edge.lagHours === 0 &&
+          row.finish !== row.earlyFinish &&
+          successor.earlyStart === row.finish
+        );
+      }),
+    );
+    expect(discriminating, 'no fixture separates the manual finish from the early finish').toBe(
+      true,
+    );
+  });
+
+  it('carries no unresolved semantics into W3-1', () => {
+    // ESCALATIONS is the corpus's contract with the tech-lead. An entry still marked open here
+    // means an implementation work item is about to guess at something that was escalated
+    // precisely so it would not have to.
+    expect(ESCALATIONS.length).toBeGreaterThanOrEqual(6);
+    for (const escalation of ESCALATIONS) {
+      expect(escalation.id, 'escalation id').toMatch(/^ESC-\d+$/);
+      expect(
+        ['ratified', 'overruled', 'ruled', 'resolved'],
+        `${escalation.id} is not resolved`,
+      ).toContain(escalation.status);
+      expect(escalation.question.length, `${escalation.id} question`).toBeGreaterThan(20);
+      expect(escalation.adopted.length, `${escalation.id} adopted`).toBeGreaterThan(20);
+      expect(escalation.affects.length, `${escalation.id} affects`).toBeGreaterThan(5);
+    }
+    expect(new Set(ESCALATIONS.map((e) => e.id)).size).toBe(ESCALATIONS.length);
+  });
 });
 
 describe('every fixture parses against the contract schemas (acceptance b)', () => {
@@ -298,10 +340,11 @@ describe('every fixture is internally consistent with its own input (acceptance 
     '%s — isCritical, projectFinish and start/finish agree with the rest of the row',
     (_id, fixture) => {
       for (const row of fixture.expected.taskSchedules) {
-        // taskScheduleComputedSchema defines isCritical as float === 0. See ESC-4 for the one place
-        // that definition is contested; this assertion is what makes the corpus self-consistent
-        // under whichever reading is chosen, because `taskSchedule()` derives the flag.
-        expect(row.isCritical, `${row.taskId} isCritical`).toBe(row.totalFloatHours === 0);
+        // FR-SCH-05 (docs/FRS.md v1.2) and taskScheduleComputedSchema define isCritical as
+        // float <= 0 — see ESC-4, where the corpus's original literal `=== 0` reading was
+        // overruled. `taskSchedule()` derives the flag, so this assertion is what proves no
+        // fixture reached past the helper and hand-set a contradicting one.
+        expect(row.isCritical, `${row.taskId} isCritical`).toBe(row.totalFloatHours <= 0);
         expect(row.earlyStart <= row.earlyFinish, `${row.taskId} ES after EF`).toBe(true);
         expect(row.lateStart <= row.lateFinish, `${row.taskId} LS after LF`).toBe(true);
         expect(row.start <= row.finish, `${row.taskId} start after finish`).toBe(true);
@@ -356,10 +399,6 @@ describe('every fixture is internally consistent with its own input (acceptance 
       // to move inside the loop.
       expect(fixture.input.tasks.every((task) => task.calendarId === null)).toBe(true);
 
-      const parentIds = new Set(
-        fixture.input.tasks.map((task) => task.parentId).filter((id) => id !== null),
-      );
-
       for (const row of fixture.expected.taskSchedules) {
         const span = (from: string, to: string) => workingHoursBetween(from, to, calendar);
 
@@ -367,14 +406,67 @@ describe('every fixture is internally consistent with its own input (acceptance 
           row.durationHours,
         );
         expect(span(row.start, row.finish), `${row.taskId} start..finish`).toBe(row.durationHours);
+        // Summaries included. Under the corpus's original ESC-2 rule a summary's LS/LF were min/max
+        // over children with different floats, so LF - LS was not its duration and this assertion
+        // had to skip them. The corrected rule shifts ES and EF by the *same* float, so the late
+        // span equals the early span for every task, summary or leaf — no exemption left to hide in.
+        expect(span(row.lateStart, row.lateFinish), `${row.taskId} LS..LF`).toBe(row.durationHours);
+      }
+    },
+  );
 
-        // A summary's LS/LF are min/max over children with different floats, so LF - LS is not its
-        // duration. That is the documented consequence of ESC-2, not a slip — so leaves only.
-        if (!parentIds.has(row.taskId)) {
-          expect(span(row.lateStart, row.lateFinish), `${row.taskId} LS..LF`).toBe(
-            row.durationHours,
-          );
-        }
+  it.each(SCHEDULED.map((fixture) => [fixture.id, fixture] as const))(
+    '%s — every summary rolls up per FR-TSK-03 and ESC-2',
+    (_id, fixture) => {
+      // The check that keeps the corrected ESC-2 rule honest. It re-derives each summary's four
+      // dates and its float from its DIRECT children, independently of the hand derivation in the
+      // fixture's comment, and requires the two to agree. Bottom-up ordering is not needed: every
+      // row already carries its own float, so a level-3 summary reads its level-2 child's float
+      // straight off the expectation rather than recomputing it.
+      const calendar = fixture.input.calendars.find(
+        (c) => c.id === fixture.input.defaultCalendarId,
+      );
+      expect(calendar).toBeDefined();
+      if (calendar === undefined) return;
+
+      const rowOf = new Map(fixture.expected.taskSchedules.map((row) => [row.taskId, row]));
+      const childrenOf = new Map<TaskId, TaskId[]>();
+      for (const task of fixture.input.tasks) {
+        if (task.parentId === null) continue;
+        childrenOf.set(task.parentId, [...(childrenOf.get(task.parentId) ?? []), task.id]);
+      }
+
+      for (const [parentId, childIds] of childrenOf) {
+        const parent = rowOf.get(parentId);
+        expect(parent, `${parentId} has children but no schedule row`).toBeDefined();
+        if (parent === undefined) continue;
+        const children = childIds.map((id) => rowOf.get(id)).filter((row) => row !== undefined);
+        expect(children.length).toBe(childIds.length);
+
+        // FR-TSK-03, the early side.
+        expect(parent.earlyStart, `${parentId} ES = min(child ES)`).toBe(
+          children.map((c) => c.earlyStart).reduce((a, b) => (b < a ? b : a)),
+        );
+        expect(parent.earlyFinish, `${parentId} EF = max(child EF)`).toBe(
+          maxIso(children.map((c) => c.earlyFinish)),
+        );
+
+        // ESC-2, the late side: float is the least slack among the direct children, and LS/LF are
+        // ES/EF shifted by exactly that much in working time.
+        const float = Math.min(...children.map((c) => c.totalFloatHours));
+        expect(parent.totalFloatHours, `${parentId} float = min(child float)`).toBe(float);
+        expect(
+          workingHoursBetween(parent.earlyStart, parent.lateStart, calendar),
+          `${parentId} LS - ES`,
+        ).toBe(float);
+        expect(
+          workingHoursBetween(parent.earlyFinish, parent.lateFinish, calendar),
+          `${parentId} LF - EF`,
+        ).toBe(float);
+        // The property the old rule failed: a summary spanning a critical child is itself critical.
+        expect(parent.isCritical, `${parentId} critical iff a child is`).toBe(
+          children.some((c) => c.isCritical),
+        );
       }
     },
   );

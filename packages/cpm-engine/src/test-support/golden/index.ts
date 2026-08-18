@@ -17,6 +17,7 @@ import {
   F13_FNET,
   F14_FNLT,
   F15_ALAP,
+  F20_MANUAL_FINISH_DRIVES_SUCCESSOR,
 } from './modes-and-constraints.js';
 import {
   F16_CALENDAR_EXCEPTION_MID_TASK,
@@ -30,7 +31,10 @@ import {
  * backward passes exist (W3-1) so that no expectation in it could have been captured from a running
  * implementation. `common.ts` explains why that ordering is the point rather than an accident, and
  * carries the shared working-time frame, the day table, the boundary convention and `ESCALATIONS` —
- * the list of semantics the FRS does not pin, which W3-1 needs resolved before it builds.
+ * the semantics the FRS did not pin, all six now ruled on by the tech-lead and applied here (W2-4).
+ * Two of the six went against what W2-3 had adopted, so the corpus's own expectations moved: ESC-2
+ * changed every summary's LS/LF (F07, F17) and ESC-4 changed what negative float means (F12). ESC-6
+ * added F20. Read `ESCALATIONS` before changing an expectation that cites one.
  *
  * ## How this is meant to be consumed
  *
@@ -58,6 +62,7 @@ import {
  *   Four-level WBS rollup .......................... F17
  *   Milestone chain ................................ F18
  *   Cycle rejection ................................ F19
+ *   Manual finish drives the successor (ESC-6) ..... F20
  * ```
  *
  * ## Not covered here, and deliberately so
@@ -90,6 +95,7 @@ export const GOLDEN_FIXTURES: readonly GoldenFixture[] = Object.freeze([
   F17_FOUR_LEVEL_WBS,
   F18_MILESTONE_CHAIN,
   F19_CYCLE_REJECTED,
+  F20_MANUAL_FINISH_DRIVES_SUCCESSOR,
 ]);
 
 export type { GoldenFixture } from './common.js';
@@ -120,6 +126,7 @@ export {
   F13_FNET,
   F14_FNLT,
   F15_ALAP,
+  F20_MANUAL_FINISH_DRIVES_SUCCESSOR,
 } from './modes-and-constraints.js';
 export {
   F16_CALENDAR_EXCEPTION_MID_TASK,

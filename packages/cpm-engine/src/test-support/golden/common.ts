@@ -75,77 +75,126 @@ import { calendarId, projectId, taskId } from '../fixtures.js';
  * precedes the project start as far as this project is concerned. Without that clause the rule would
  * date a milestone at the project start three days before the project.
  *
- * The one case the convention does *not* settle is a **zero-duration** task landing on a day
- * boundary with working time on *both* sides, where start and finish must be the same instant and
- * the two rules disagree. That is unresolved (ESC-3), so F18 places every milestone either at an
- * interior working hour or at the project start, where the floor above makes the answer unique —
- * never at an interior day boundary.
+ * The one case this convention does not settle *by itself* is a **zero-duration** task landing on a
+ * day boundary with working time on both sides, where start and finish must be the same instant and
+ * the two rules disagree. The calendar kernel settles it: `addWorkingHours(t, 0, calendar)`
+ * (`../../calendar.ts`, W2-1) snaps **forward** to the earliest working instant at or after `t`, so
+ * a milestone at the Friday-16:00/Monday-08:00 seam sits at Monday 08:00. W3-1 places milestones by
+ * calling that same primitive, so there is nothing left to choose (ESC-3, resolved). F18 still keeps
+ * its milestones at interior working hours or at the project start — it was written to test
+ * FR-TSK-04's "no accumulated span", not the seam, and it stays as it is.
  *
- * # Conventions this corpus had to choose, which the FRS does not pin
+ * # Summary tasks: rollup and late dates (FR-TSK-03 + FR-SCH-05)
+ *
+ * FR-TSK-03 pins the early side — `ES = min(child ES)`, `EF = max(child EF)`, duration = the
+ * working-hour span of that range. Nothing in the FRS pins the late side, and the answer is **not**
+ * min/max of the children's late dates (ESC-2, overruled: that rule can report a summary as
+ * non-critical while it contains a critical child). What this corpus uses instead:
+ *
+ * ```
+ *   totalFloat(summary) = min( totalFloat(child) ) over its DIRECT children
+ *   LS = ES + totalFloat        LF = EF + totalFloat        (both shifts in WORKING time)
+ * ```
+ *
+ * A summary can slip by `d` without pushing the project out exactly when *every* child can, so the
+ * binding child is the least slack one — hence `min`. Two properties fall out by construction:
+ * `totalFloat === LS - ES` exactly (no rounding, no special case), and a summary containing a child
+ * with float `<= 0` is itself critical, which is what FR-SCH-10 needs in order to have a bar to
+ * highlight. Both instants are then *spelled* under the boundary convention above: LS forward, LF
+ * backward. Note that `addWorkingHours(EF, 0)` would forward-snap a finish sitting on a seam onto
+ * the next morning, so a zero-float summary's `LF` is `EF` itself rather than a call through the
+ * kernel — a detail W3-1 has to get right and `golden-corpus.test.ts` re-derives independently.
+ *
+ * # Conventions the FRS did not pin, and how they were settled
  *
  * Recorded in `ESCALATIONS` below rather than buried in whichever fixture happened to hit them
- * first. W3-1 must have these resolved *before* building against the corpus, not discover them
- * afterwards from a red test.
+ * first. All six were escalated by W2-3 rather than guessed at, and all six have been ruled on
+ * (W2-4) — two of them against what the corpus had adopted, which is why escalating was worth the
+ * delay. W3-1 builds against a corpus with no open questions in it.
  */
 
 // ---------------------------------------------------------------------------------------------
-// Unresolved semantics — for tech-lead, ahead of W3-1
+// Escalated semantics and the rulings on them — settled before W3-1
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Places where the FRS text and `packages/shared-types/src/cpm.ts` do not fully determine an
- * expected value, the interpretation this corpus adopted, and the fixtures that would have to
- * change if the decision goes the other way.
+ * Places where the FRS text and `packages/shared-types/src/cpm.ts` did not fully determine an
+ * expected value, **the tech-lead's ruling on each**, and the fixtures that carry it.
  *
  * These are **not** rhetorical. Each one changes at least one committed expectation.
+ *
+ * All six were raised by W2-3 and ruled on before W3-1 (this file's edit history and
+ * `docs/FRS.md`'s v1.2 amendment carry the full reasoning; the summaries below are deliberately
+ * short). `status` is the disposition of the *question*, and `adopted` always describes the
+ * convention **now in force** — never the one that was overruled — so that a reader who scrolls to
+ * one entry cannot come away with the superseded rule:
+ *
+ * ```
+ *   ratified   the corpus's original reading stands, unchanged
+ *   overruled  the corpus's original reading was wrong; `adopted` is the replacement
+ *   ruled      the corpus declined to choose; the ruling picked one and a fixture now pins it
+ *   resolved   never actually open once existing merged code was accounted for
+ * ```
+ *
+ * `golden-corpus.test.ts` asserts that no entry is still open, so a seventh escalation cannot be
+ * added and then quietly forgotten on the way into an implementation work item.
  */
 export const ESCALATIONS = Object.freeze([
   Object.freeze({
     id: 'ESC-1',
+    status: 'ratified',
     question: 'What does CpmMetrics.dependenciesTraversed count — edges once, or once per pass?',
     adopted:
       'Once per pass: 2 x |structurally valid edges| (forward relaxation + backward relaxation).',
-    affects: 'metrics on every scheduled fixture; changed in one place, `metrics()` below.',
+    affects: 'metrics on every scheduled fixture; set in one place, `metrics()` below.',
   }),
   Object.freeze({
     id: 'ESC-2',
+    status: 'overruled',
     question:
       'What are a summary task’s LS/LF? FR-TSK-03 rolls up start/finish/duration and FR-SCH-05 defines float as LS - ES, but nothing defines a summary’s late dates.',
     adopted:
-      'ES = min(child ES), EF = max(child EF), LS = min(child LS), LF = max(child LF), float = LS - ES. Consequence: for a summary, LF - EF is generally NOT equal to totalFloatHours, because a summary spans children with different floats.',
-    affects: 'F07 (parent P), F17 (all three summary levels).',
+      'totalFloat = min(totalFloat over its DIRECT children); LS = ES + totalFloat and LF = EF + totalFloat, both shifted in working time. The early side is FR-TSK-03 unchanged: ES = min(child ES), EF = max(child EF). The corpus originally took LS = min(child LS) / LF = max(child LF); the tech-lead overruled it as a bug rather than a style choice, because a summary over children A(float 3) and B(float 0) then reports float 2 and is NOT flagged critical even though it spans the critical child B — leaving FR-SCH-10 drawing a critical path with a hole in it. The replacement is self-consistent by construction (float === LS - ES exactly) and propagates criticality upward.',
+    affects: 'F07 (parent t1), F17 (all three summary levels).',
   }),
   Object.freeze({
     id: 'ESC-3',
+    status: 'resolved',
     question:
       'Where does a zero-duration task sit when its instant falls on a working-day boundary with working time on both sides — end of the previous day, or start of the next?',
     adopted:
-      'Not adopted. The corpus avoids the case (F18 keeps every milestone at an interior working hour or at the project start, where the never-cross-projectStart floor makes the answer unique) rather than committing a guess.',
-    affects: 'nothing today; it will bite the first real project whose milestone lands at 16:00.',
+      'The start of the next: `addWorkingHours(t, 0, calendar)` (`../../calendar.ts`, merged in W2-1) already snaps forward to the earliest working instant at or after the candidate, and W3-1 places a milestone by calling that primitive rather than by inventing a second rule for zero durations. So the question was never open once the calendar kernel existed — it only looked open because the corpus was reasoning from the FRS text alone.',
+    affects:
+      'no fixture. F18 keeps its milestones at interior working hours or at the project start because it tests FR-TSK-04’s "no accumulated span", not the seam.',
   }),
   Object.freeze({
     id: 'ESC-4',
+    status: 'overruled',
     question:
-      'Is a task with NEGATIVE total float on the critical path? FR-SCH-05 and taskScheduleComputedSchema both say literally "float === 0"; conventional CPM treats float <= 0 as critical, which is also the only reading that keeps the critical path a connected chain on an over-constrained project.',
+      'Is a task with NEGATIVE total float on the critical path? FR-SCH-05 and taskScheduleComputedSchema both said literally "float === 0"; conventional CPM treats float <= 0 as critical, which is also the only reading that keeps the critical path a connected chain on an over-constrained project.',
     adopted:
-      'The literal contract text: isCritical === (totalFloatHours === 0), so a negative-float task is NOT critical.',
-    affects: 'F12 (SNLT violated) — both tasks carry float -8 and isCritical false.',
+      'isCritical === (totalFloatHours <= 0). The contract text was the thing that was wrong: docs/FRS.md v1.2 tightens FR-SCH-05 to "Float <= 0" and `taskScheduleComputedSchema.isCritical` (packages/shared-types/src/schedule.ts) now documents it. Derived in `taskSchedule()` below, so no fixture states the flag by hand.',
+    affects:
+      'F12 (SNLT violated) — both tasks carry float -8 and are now critical. Every other fixture is unaffected: no other expectation in the corpus has negative float.',
   }),
   Object.freeze({
     id: 'ESC-5',
+    status: 'ratified',
     question:
       'What does ALAP (FR-TSK-06) change — the persisted start/finish, or the computed ES/EF?',
     adopted:
       'The persisted dates only: start = LS and finish = LF, while earlyStart/earlyFinish keep reporting the early dates, so totalFloatHours stays LS - ES. This mirrors the split cpm.ts already specifies for a manual task ("start/finish are the user’s fixed dates while ES/EF still report where the graph would have put it").',
-    affects: 'F15.',
+    affects: 'F15, unchanged.',
   }),
   Object.freeze({
     id: 'ESC-6',
+    status: 'ruled',
     question:
       'Do successors of a MANUAL task schedule from the manual finish, or from the graph-implied earlyFinish the manual task would have had?',
     adopted:
-      'Not adopted. The corpus avoids the case: F07’s manual dates coincide exactly with the graph-implied dates (so both readings agree), and F08’s conflicted manual task has no successors. A fixture that guessed here would hard-code a product decision.',
-    affects: 'nothing today; W3-1 cannot avoid deciding it.',
+      'From the manual finish — the manual dates are the real commitment, and a successor that scheduled off the graph-implied early finish instead would make manual mode meaningless for anything downstream. The manual task’s own earlyStart/earlyFinish keep reporting where the graph would have put it (cpm.ts), so the two readings are visibly different numbers on the same row.',
+    affects:
+      'F20, added to pin it. F07 and F08 could not: F07’s manual dates coincide with the graph-implied ones and F08’s manual task has no successor, so neither discriminates.',
   }),
 ]);
 
@@ -222,9 +271,10 @@ export interface TaskScheduleParts {
 
 /**
  * One row of `taskSchedules`. `isCritical` is **derived here** rather than passed, because
- * `taskScheduleComputedSchema` defines it as `float === 0` and a fixture that could state a
- * different answer would be able to encode a self-inconsistent expectation. See ESC-4 for the one
- * place that definition is contentious.
+ * FR-SCH-05 (docs/FRS.md v1.2) defines it as `float <= 0` and a fixture that could state a
+ * different answer would be able to encode a self-inconsistent expectation. ESC-4 is where that
+ * `<= 0` — rather than the `=== 0` this corpus first wrote — was ruled on; because the flag is
+ * derived, applying the ruling was this one line and no fixture had to be hand-edited.
  */
 export function taskSchedule(n: number, parts: TaskScheduleParts): CpmTaskSchedule {
   return {
@@ -234,7 +284,7 @@ export function taskSchedule(n: number, parts: TaskScheduleParts): CpmTaskSchedu
     lateStart: parts.ls,
     lateFinish: parts.lf,
     totalFloatHours: parts.floatHours,
-    isCritical: parts.floatHours === 0,
+    isCritical: parts.floatHours <= 0,
     hasScheduleConflict: parts.conflict ?? false,
     start: parts.start ?? parts.es,
     finish: parts.finish ?? parts.ef,
@@ -252,9 +302,9 @@ export interface MetricsParts {
 }
 
 /**
- * `CpmMetrics`, with **ESC-1's convention applied in exactly one place**. If the tech-lead rules
- * that `dependenciesTraversed` counts each edge once rather than once per pass, this line changes
- * and no fixture does — which is why it is a helper and not 19 literals.
+ * `CpmMetrics`, with **ESC-1's convention applied in exactly one place**. The tech-lead ratified
+ * once-per-pass, so the line below stands; had it gone the other way this line would have changed
+ * and no fixture would have — which is why it is a helper and not 20 literals.
  */
 export function metrics(parts: MetricsParts): CpmMetrics {
   return {
