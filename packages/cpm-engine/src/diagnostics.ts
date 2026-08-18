@@ -24,3 +24,11 @@ export type CpmDanglingDependencyDiagnostic = Extract<
   CpmDiagnostic,
   { code: 'dangling_dependency' }
 >;
+
+/**
+ * The `unusable_calendar` arm: a calendar with no recurring working time (FR-CAL-01). `cpm.ts`
+ * names it "the termination guard for working-time advancement", and `calendar.ts` is where that
+ * guard is applied — `compileCalendar` returns this instead of a calendar, so the walk that could
+ * not terminate never receives one.
+ */
+export type CpmUnusableCalendarDiagnostic = Extract<CpmDiagnostic, { code: 'unusable_calendar' }>;
