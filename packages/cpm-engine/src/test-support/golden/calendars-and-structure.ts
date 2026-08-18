@@ -156,34 +156,44 @@ export const F16_CALENDAR_EXCEPTION_MID_TASK: GoldenFixture = {
  *   t5 GC2  no successor    LF = 48              LS = 48 -  8 = 40     float 40 -  0 = 40
  *   t6 A    FS to t4        LF = t4.LS =  8      LS =  8 -  8 =  0     float  0 -  0 =  0
  * ```
- * Rollup, innermost first (ESC-2: ES = min child ES, EF = max child EF, LS = min child LS,
- * LF = max child LF, float = LS - ES; start/finish = min/max of the children's dates; duration =
- * the working-hour span, FR-SCH-07):
+ * Rollup, innermost first, by the ESC-2 rule (`common.ts`, "Summary tasks: rollup and late dates"):
+ * `ES = min(child ES)`, `EF = max(child EF)` per FR-TSK-03; `float = min(child float)`;
+ * `LS = ES + float` and `LF = EF + float` in working time; start/finish = min/max of the children's
+ * dates; duration = the working-hour span (FR-SCH-07). Each level consumes only its **direct**
+ * children — including children that are themselves summaries, whose float was computed one line
+ * earlier:
  * ```
- *   t3 C  over {GC1, GC2}:  ES = min( 8, 0) =  0    EF = max(24,  8) = 24
- *                           LS = min( 8,40) =  8    LF = max(24, 48) = 48    float 8 -  0 =  8
+ *   t3 C  over {GC1, GC2}:  ES  = min( 8,  0) =  0        EF = max(24,  8) = 24
+ *                           float = min(0, 40) = 0        <- from GC1; GC2's 40 never binds
+ *                           LS  =  0 + 0 =  0             LF = 24 + 0 = 24
  *                           span wh 0 -> 24  ->  durationHours 24
- *   t2 P  over {C, B}:      ES = min( 0,24) =  0    EF = max(24, 48) = 48
- *                           LS = min( 8,24) =  8    LF = max(48, 48) = 48    float 8 -  0 =  8
+ *   t2 P  over {C, B}:      ES  = min( 0, 24) =  0        EF = max(24, 48) = 48
+ *                           float = min(C 0, B 0) = 0     <- C's float, just derived above
+ *                           LS  =  0 + 0 =  0             LF = 48 + 0 = 48
  *                           span wh 0 -> 48  ->  durationHours 48
- *   t1 GP over {P, A}:      ES = min( 0, 0) =  0    EF = max(48,  8) = 48
- *                           LS = min( 8, 0) =  0    LF = max(48,  8) = 48    float 0 -  0 =  0
+ *   t1 GP over {P, A}:      ES  = min( 0,  0) =  0        EF = max(48,  8) = 48
+ *                           float = min(P 0, A 0) = 0
+ *                           LS  =  0 + 0 =  0             LF = 48 + 0 = 48
  *                           span wh 0 -> 48  ->  durationHours 48
  * ```
  * The level-by-level check: rolling P up from {C, B} gives the same answer as rolling it up from
- * all four of its descendant leaves, because min and max are associative. An implementation that
- * only looks at direct children and one that flattens to leaves must therefore agree — if they do
- * not, one of them is dropping a level, and t2's `earlyStart` of wh 0 (which it can only get
- * through C, from GC2) is the value that catches it.
+ * all four of its descendant leaves, because min and max are associative — and that now covers the
+ * late side too, since `min(child float)` is a min like the others. An implementation that only
+ * looks at direct children and one that flattens to leaves must therefore agree — if they do not,
+ * one of them is dropping a level, and t2's `earlyStart` of wh 0 (which it can only get through C,
+ * from GC2) is the value that catches it.
  *
- * Note GP is critical (float 0) while P and C are not (float 8): criticality does not simply
- * propagate up a WBS tree, because GP inherits its LS from the critical leaf A that hangs directly
- * off it.
+ * All three summaries come out critical, each because the chain A -> GC1 -> B runs through it: C
+ * contains GC1, P contains C and B, GP contains all of them. That is the corrected rule doing what
+ * it was corrected for — under the corpus's original `LS = min(child LS)` / `LF = max(child LF)`,
+ * C and P reported float 8 and were drawn as non-critical bars spanning critical children, which is
+ * a hole in the FR-SCH-10 highlight. GC2 keeps its float 40 and stays non-critical; criticality
+ * propagates *up* a WBS tree, never *down* it.
  */
 export const F17_FOUR_LEVEL_WBS: GoldenFixture = {
   id: 'F17-four-level-wbs-rollup',
   proves:
-    'Rollup composes through grandparent -> parent -> child -> grandchild, mixing a rolled-up child with a directly-scheduled leaf at every level.',
+    'Rollup composes through grandparent -> parent -> child -> grandchild, mixing a rolled-up child with a directly-scheduled leaf at every level, and float reaches every summary spanning the critical chain.',
   requirements: ['FR-TSK-02', 'FR-TSK-03', 'FR-SCH-05', 'FR-SCH-07'],
   input: scheduleInput({
     tasks: [
@@ -200,30 +210,30 @@ export const F17_FOUR_LEVEL_WBS: GoldenFixture = {
   expected: scheduled({
     taskSchedules: [
       taskSchedule(1, {
-        // GP
-        es: '2026-09-07T08:00:00.000Z', // wh 0
-        ef: '2026-09-14T16:00:00.000Z', // wh 48
-        ls: '2026-09-07T08:00:00.000Z', // wh 0
-        lf: '2026-09-14T16:00:00.000Z', // wh 48
+        // GP — float = min(P 0, A 0) = 0
+        es: '2026-09-07T08:00:00.000Z', // wh 0  = min(child ES)
+        ef: '2026-09-14T16:00:00.000Z', // wh 48 = max(child EF)
+        ls: '2026-09-07T08:00:00.000Z', // wh 0  = ES + 0
+        lf: '2026-09-14T16:00:00.000Z', // wh 48 = EF + 0
         floatHours: 0,
         durationHours: 48,
       }),
       taskSchedule(2, {
-        // P
-        es: '2026-09-07T08:00:00.000Z', // wh 0
-        ef: '2026-09-14T16:00:00.000Z', // wh 48
-        ls: '2026-09-08T08:00:00.000Z', // wh 8
-        lf: '2026-09-14T16:00:00.000Z', // wh 48
-        floatHours: 8,
+        // P — float = min(C 0, B 0) = 0
+        es: '2026-09-07T08:00:00.000Z', // wh 0  = min(child ES)
+        ef: '2026-09-14T16:00:00.000Z', // wh 48 = max(child EF)
+        ls: '2026-09-07T08:00:00.000Z', // wh 0  = ES + 0
+        lf: '2026-09-14T16:00:00.000Z', // wh 48 = EF + 0
+        floatHours: 0,
         durationHours: 48,
       }),
       taskSchedule(3, {
-        // C
-        es: '2026-09-07T08:00:00.000Z', // wh 0
-        ef: '2026-09-09T16:00:00.000Z', // wh 24
-        ls: '2026-09-08T08:00:00.000Z', // wh 8
-        lf: '2026-09-14T16:00:00.000Z', // wh 48
-        floatHours: 8,
+        // C — float = min(GC1 0, GC2 40) = 0
+        es: '2026-09-07T08:00:00.000Z', // wh 0  = min(child ES)
+        ef: '2026-09-09T16:00:00.000Z', // wh 24 = max(child EF)
+        ls: '2026-09-07T08:00:00.000Z', // wh 0  = ES + 0
+        lf: '2026-09-09T16:00:00.000Z', // wh 24 = EF + 0
+        floatHours: 0,
         durationHours: 24,
       }),
       taskSchedule(4, {
