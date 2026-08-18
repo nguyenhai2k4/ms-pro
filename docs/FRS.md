@@ -1,7 +1,18 @@
 # Functional Requirements Specification: ProjectApp
-**Version:** 1.1 | **Status:** Draft for review | **Derived from:** PRD v0.1 (`docs/PRD.md`)
-**Author:** Claude (analysis) | **Date:** 2026-08-14 | **Amended:** 2026-08-15
+**Version:** 1.2 | **Status:** Draft for review | **Derived from:** PRD v0.1 (`docs/PRD.md`)
+**Author:** Claude (analysis) | **Date:** 2026-08-14 | **Amended:** 2026-08-16
 
+> **v1.2 amendment (P2 phase entry).** FR-SCH-05's "Float = 0" wording is tightened to
+> "Float ≤ 0" (below). The golden-file corpus (`packages/cpm-engine`) surfaced this as a real
+> gap while hand-deriving fixtures, not a style question: the FRS text implicitly assumes a
+> project that isn't over-constrained. On an over-constrained project (an unmeetable SNLT/FNLT,
+> or a summary task whose most-constrained child has negative float), the literal "= 0" reading
+> can mark *nothing* critical, which breaks FR-SCH-10's "the critical path shall be visually
+> distinguished" — exactly when a user most needs to see it. "≤ 0" is standard CPM practice, is
+> the only reading under which the critical path stays a connected chain end-to-end, and is what
+> `taskScheduleComputedSchema.isCritical` (`packages/shared-types/src/schedule.ts`) now
+> documents. No other requirement in this section changed.
+>
 > **v1.1 amendment (P0 phase entry).** §3.11 (`FR-AUTH-*`) and §3.12 (`FR-PRJ-*`) were added
 > because P0's two largest deliverables — authentication and the org/project shell — had no
 > requirement IDs to cite, while `CLAUDE.md` requires every commit to cite one. No new scope
@@ -81,7 +92,7 @@ to test cases and PRs. "MVP" = must ship in Phase 1; "P2" = Phase 2 per PRD scop
 | FR-SCH-02 | Dependencies shall support signed lag/lead in days (or hours, calendar-aware). | MVP |
 | FR-SCH-03 | The system shall reject dependency edits that would introduce a cycle, with a clear error identifying the cycle. | MVP |
 | FR-SCH-04 | On any mutation affecting the schedule (task duration/dates, dependency add/remove/change, calendar change, constraint change), the system shall recompute Early Start/Finish (forward pass) and Late Start/Finish (backward pass) for all tasks in the affected connected subgraph. | MVP |
-| FR-SCH-05 | The system shall compute Total Float = LS − ES per task and mark tasks with Float = 0 as **critical path**. | MVP |
+| FR-SCH-05 | The system shall compute Total Float = LS − ES per task and mark tasks with Float ≤ 0 as **critical path** (v1.2: tightened from "= 0" — see the phase-entry amendment above). | MVP |
 | FR-SCH-06 | Full-project recalculation shall complete in **&lt;500ms for 5,000 tasks** (p95); incremental (subgraph) recalculation shall complete in **&lt;150ms** for typical single-task edits regardless of project size, achieved via topological-sort-from-changed-node rather than full recompute. | MVP |
 | FR-SCH-07 | Recalculation shall respect project/task/resource calendars (skip non-working days/hours) when converting duration to dates. | MVP |
 | FR-SCH-08 | Auto-scheduled tasks whose predecessors move shall shift automatically; manually-scheduled tasks shall not move but shall visually flag a resulting date conflict (predecessor finishes after a manual task's fixed start, for FS). | MVP |

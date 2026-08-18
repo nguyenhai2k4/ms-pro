@@ -40,7 +40,13 @@ export const taskScheduleComputedSchema = z.object({
   lateFinish: isoDateTimeSchema,
   /** FR-SCH-05: Total Float = LS - ES, in hours. May be negative on an over-constrained project. */
   totalFloatHours: z.number().finite(),
-  /** FR-SCH-05: float === 0. Rendered red in the Gantt and filterable in the grid (FR-SCH-10). */
+  /**
+   * FR-SCH-05 (docs/FRS.md v1.2): `float <= 0`, not `=== 0`. On an over-constrained project (an
+   * unmeetable SNLT/FNLT, or a summary whose most-constrained child has negative float) nothing
+   * has exactly zero float, and the strict reading would leave FR-SCH-10 with no path to
+   * highlight precisely when a user most needs to see one. Rendered red in the Gantt and
+   * filterable in the grid (FR-SCH-10).
+   */
   isCritical: z.boolean(),
   /**
    * FR-SCH-08: a manually-scheduled task whose fixed dates conflict with its predecessors. The
