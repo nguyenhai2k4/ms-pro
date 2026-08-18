@@ -1,4 +1,4 @@
-import type { Task } from '@projectapp/shared-types';
+import type { Dependency, Task } from '@projectapp/shared-types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
@@ -88,4 +88,19 @@ const baseTask: Task = {
  */
 export function makeTask(overrides: Record<string, unknown> = {}): Task {
   return { ...baseTask, ...overrides } as unknown as Task;
+}
+
+const baseDependency: Dependency = {
+  id: 'dep1',
+  projectId: 'p1',
+  predecessorId: 'pred1',
+  successorId: 't1',
+  type: 'FS',
+  lagHours: 0,
+  createdAt: '2026-09-01T08:00:00.000Z',
+} as unknown as Dependency;
+
+/** Same branding note as `makeTask` — a loosely-typed override bag, cast once here. */
+export function makeDependency(overrides: Record<string, unknown> = {}): Dependency {
+  return { ...baseDependency, ...overrides } as unknown as Dependency;
 }

@@ -1,5 +1,12 @@
-import type { DeleteTaskChildPolicy, Task, UpdateTaskRequest } from '@projectapp/shared-types';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type {
+  CreateDependencyRequest,
+  DeleteTaskChildPolicy,
+  Dependency,
+  Task,
+  UpdateDependencyRequest,
+  UpdateTaskRequest,
+} from '@projectapp/shared-types';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createColumnHelper,
   flexRender,
@@ -8,6 +15,7 @@ import {
 } from '@tanstack/react-table';
 import { useMemo, useState } from 'react';
 import type { ApiClient } from '../api/client.js';
+import { PredecessorsCell } from './PredecessorsCell.jsx';
 import { buildChildCounts, wbsDepth } from './task-hierarchy.js';
 import {
   ActionsCell,
@@ -116,6 +124,40 @@ export function TaskTree({ api, projectId, tasks, canEdit }: TaskTreeProps): JSX
     onError: onMutationError,
   });
 
+  // FR-SCH-01..03: dependency links are a second entity fetched alongside the task list, not a
+  // field on `Task` — `PredecessorsCell` is the only reader. A link's create/retype/delete does
+  // not (yet — W3-1) move any task's dates, so success only invalidates this query, not `tasks`.
+  const dependenciesQuery = useQuery({
+    queryKey: ['dependencies', projectId],
+    queryFn: () => api.listDependencies(projectId),
+  });
+  const invalidateDependencies = (): Promise<void> =>
+    queryClient.invalidateQueries({ queryKey: ['dependencies', projectId] }).then(() => undefined);
+
+  // Unlike the task mutations above, these are not fire-and-forget: `PredecessorsCell` awaits its
+  // own call so a `409 dependency_cycle` renders inline (task names, not ids) against the field
+  // that caused it and reverts that one field, rather than only surfacing through the shared
+  // `errorMessage` banner every other cell in this tree relies on. `mutateAsync` still runs
+  // through the same `useMutation`, so TanStack Query's cache/retry behaviour is unchanged.
+  const createDependency = useMutation({
+    mutationFn: (body: CreateDependencyRequest) => api.createDependency(projectId, body),
+    onSuccess: invalidateDependencies,
+  });
+  const updateDependency = useMutation({
+    mutationFn: ({
+      dependencyId,
+      patch,
+    }: {
+      dependencyId: Dependency['id'];
+      patch: UpdateDependencyRequest;
+    }) => api.updateDependency(projectId, dependencyId, patch),
+    onSuccess: invalidateDependencies,
+  });
+  const deleteDependency = useMutation({
+    mutationFn: (dependencyId: Dependency['id']) => api.deleteDependency(projectId, dependencyId),
+    onSuccess: invalidateDependencies,
+  });
+
   const meta: TaskTreeMeta = useMemo(
     () => ({
       canEdit,
@@ -125,8 +167,27 @@ export function TaskTree({ api, projectId, tasks, canEdit }: TaskTreeProps): JSX
       onAddChild: (parentId, name) => createChild.mutate({ parentId, name }),
       onDelete: (taskId, childPolicy) => deleteTask.mutate({ taskId, childPolicy }),
       onReparent: (taskId, newParentId) => reparentTask.mutate({ taskId, newParentId }),
+      dependencies: dependenciesQuery.data?.dependencies ?? [],
+      onCreateDependency: (body) =>
+        createDependency.mutateAsync(body).then((response) => response.dependency),
+      onUpdateDependency: (dependencyId, patch) =>
+        updateDependency
+          .mutateAsync({ dependencyId, patch })
+          .then((response) => response.dependency),
+      onDeleteDependency: (dependencyId) => deleteDependency.mutateAsync(dependencyId),
     }),
-    [canEdit, tasks, updateTask, createChild, deleteTask, reparentTask],
+    [
+      canEdit,
+      tasks,
+      updateTask,
+      createChild,
+      deleteTask,
+      reparentTask,
+      dependenciesQuery.data,
+      createDependency,
+      updateDependency,
+      deleteDependency,
+    ],
   );
 
   const columns = useMemo(() => {
@@ -157,6 +218,11 @@ export function TaskTree({ api, projectId, tasks, canEdit }: TaskTreeProps): JSX
         id: 'finish',
         header: 'Finish',
         cell: (info) => <FinishCell task={info.row.original} />,
+      }),
+      columnHelper.display({
+        id: 'predecessors',
+        header: 'Predecessors',
+        cell: (info) => <PredecessorsCell task={info.row.original} meta={meta} />,
       }),
       columnHelper.display({
         id: 'pctComplete',

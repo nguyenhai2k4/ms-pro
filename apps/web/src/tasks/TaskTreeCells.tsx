@@ -1,4 +1,11 @@
-import type { DeleteTaskChildPolicy, Task, UpdateTaskRequest } from '@projectapp/shared-types';
+import type {
+  CreateDependencyRequest,
+  DeleteTaskChildPolicy,
+  Dependency,
+  Task,
+  UpdateDependencyRequest,
+  UpdateTaskRequest,
+} from '@projectapp/shared-types';
 import { taskStatusSchema } from '@projectapp/shared-types';
 import { useState } from 'react';
 import { descendantIds } from './task-hierarchy.js';
@@ -24,6 +31,20 @@ export interface TaskTreeMeta {
   readonly onAddChild: (parentId: Task['id'], name: string) => void;
   readonly onDelete: (taskId: Task['id'], childPolicy?: DeleteTaskChildPolicy) => void;
   readonly onReparent: (taskId: Task['id'], newParentId: Task['id'] | null) => void;
+  /**
+   * FR-SCH-01..03: every dependency link in the project, unfiltered — `PredecessorsCell` selects
+   * the ones pointing at its own task. Unlike the callbacks above, the three dependency mutations
+   * return a `Promise` rather than firing-and-forgetting: `PredecessorsCell` awaits its own call so
+   * a `409 dependency_cycle` can be rendered inline (task names, not ids) and the field reverted,
+   * instead of only surfacing through this tree's shared error banner.
+   */
+  readonly dependencies: readonly Dependency[];
+  readonly onCreateDependency: (body: CreateDependencyRequest) => Promise<Dependency>;
+  readonly onUpdateDependency: (
+    dependencyId: Dependency['id'],
+    patch: UpdateDependencyRequest,
+  ) => Promise<Dependency>;
+  readonly onDeleteDependency: (dependencyId: Dependency['id']) => Promise<void>;
 }
 
 const STATUS_LABELS: Record<Task['status'], string> = {
