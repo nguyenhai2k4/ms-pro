@@ -47,6 +47,10 @@ export function createMockApi(overrides: Partial<ApiClient> = {}): ApiClient {
     updateCalendar: vi.fn(),
     addCalendarException: vi.fn(),
     removeCalendarException: vi.fn(),
+    listDependencies: vi.fn().mockResolvedValue({ dependencies: [] }),
+    createDependency: vi.fn(),
+    updateDependency: vi.fn(),
+    deleteDependency: vi.fn(),
   };
   return { ...base, ...overrides };
 }

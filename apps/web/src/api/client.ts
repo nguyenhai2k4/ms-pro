@@ -5,10 +5,13 @@ import type {
   CalendarResponse,
   CreateCalendarExceptionRequest,
   CreateCalendarRequest,
+  CreateDependencyRequest,
   CreateProjectRequest,
   CreateTaskRequest,
   CurrentUserResponse,
   DeleteTaskRequest,
+  DependencyListResponse,
+  DependencyResponse,
   LoginRequest,
   ProjectSummary,
   RegisterRequest,
@@ -17,6 +20,7 @@ import type {
   TaskListResponse,
   TaskResponse,
   UpdateCalendarRequest,
+  UpdateDependencyRequest,
   UpdateTaskRequest,
 } from '@projectapp/shared-types';
 
@@ -138,6 +142,30 @@ export function createApiClient(options: ApiClientOptions) {
       request<void>(
         'DELETE',
         `/projects/${encodeURIComponent(projectId)}/calendars/${encodeURIComponent(calendarId)}/exceptions/${encodeURIComponent(exceptionId)}`,
+      ),
+
+    // FR-SCH-01..04
+    listDependencies: (projectId: string) =>
+      request<DependencyListResponse>(
+        'GET',
+        `/projects/${encodeURIComponent(projectId)}/dependencies`,
+      ),
+    createDependency: (projectId: string, body: CreateDependencyRequest) =>
+      request<DependencyResponse>(
+        'POST',
+        `/projects/${encodeURIComponent(projectId)}/dependencies`,
+        body,
+      ),
+    updateDependency: (projectId: string, dependencyId: string, body: UpdateDependencyRequest) =>
+      request<DependencyResponse>(
+        'PATCH',
+        `/projects/${encodeURIComponent(projectId)}/dependencies/${encodeURIComponent(dependencyId)}`,
+        body,
+      ),
+    deleteDependency: (projectId: string, dependencyId: string) =>
+      request<void>(
+        'DELETE',
+        `/projects/${encodeURIComponent(projectId)}/dependencies/${encodeURIComponent(dependencyId)}`,
       ),
   };
 }
