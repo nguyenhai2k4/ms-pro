@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "test": "vitest run",
     "test:tz": "TZ=UTC vitest run && TZ=Asia/Tokyo vitest run && TZ=America/Los_Angeles vitest run",
     "perf": "vitest run src/calendar.perf.test.ts"
