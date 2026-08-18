@@ -1,7 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
+    // `.`, not `src`: the perf harness lives in `test/` precisely because it must read a clock and
+    // `src/` may not (CLAUDE.md invariant 1). Both trees are type-checked; neither is emitted.
+    "rootDir": ".",
     "noEmit": true,
     // No DOM. The engine is a pure computation called from Node (apps/api in P2, the Scheduler
     // Service in P3); a `document` reference in here would be a category error, and inheriting
@@ -13,5 +15,5 @@
     // scanner, which is the check that survives someone loosening the lint config.
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

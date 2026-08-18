@@ -1,4 +1,11 @@
-import type { CpmDependency, CpmTask, DependencyId, TaskId } from '@projectapp/shared-types';
+import type {
+  CalendarId,
+  CpmDependency,
+  CpmTask,
+  DependencyId,
+  ProjectId,
+  TaskId,
+} from '@projectapp/shared-types';
 
 /**
  * Graph fixtures for the test suite.
@@ -23,6 +30,16 @@ export function taskId(n: number): TaskId {
 
 export function dependencyId(n: number): DependencyId {
   return uuid('00000002', n) as DependencyId;
+}
+
+/** Same scheme, third namespace — the golden corpus needs calendars a fixture can name (FR-TSK-07). */
+export function calendarId(n: number): CalendarId {
+  return uuid('00000003', n) as CalendarId;
+}
+
+/** Same scheme, fourth namespace. `CpmScheduleInput.projectId` is echoed back in every result. */
+export function projectId(n: number): ProjectId {
+  return uuid('00000004', n) as ProjectId;
 }
 
 /** An auto-scheduled, unconstrained 8-hour leaf. Overrides are for the field under test only. */
