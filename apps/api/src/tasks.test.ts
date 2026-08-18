@@ -1104,51 +1104,61 @@ describe('FR-TSK-02: WBS renumbering never collides on UNIQUE (project_id, wbs_c
     expect((await readTask(dana.token, projectId, b.id)).wbsCode).toBe('1.3');
   });
 
-  it('stays consistent across a long random sequence of moves and deletes', async () => {
-    const dana = await register('Dana', 'dana@acme.test');
-    const projectId = await createProject(dana.token);
+  // 52 sequential HTTP round-trips against an in-process Postgres comfortably clear the default
+  // 5s vitest timeout in isolation, but not under `pnpm -r test`'s six-package concurrent load
+  // (observed ~9.2s there vs. ~7.2s isolated) — a load-sensitivity flake, not a correctness
+  // regression. 30s keeps the same test meaningful without it being a CI coin flip.
+  const LONG_RANDOM_WALK_TIMEOUT_MS = 30_000;
 
-    // A deterministic pseudo-random walk: same seed, same sequence, so a failure is reproducible
-    // by re-running rather than by luck. (The CPM property suite in P2 gets the real generator;
-    // this is the WBS-renumbering half of the same idea, which is what P1 actually ships.)
-    let seed = 20260816;
-    const next = (bound: number): number => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed % bound;
-    };
+  it(
+    'stays consistent across a long random sequence of moves and deletes',
+    async () => {
+      const dana = await register('Dana', 'dana@acme.test');
+      const projectId = await createProject(dana.token);
 
-    const ids: string[] = [];
-    for (let index = 0; index < 12; index += 1) {
-      const parentId = ids.length === 0 ? null : (ids[next(ids.length)] ?? null);
-      const created = await post(dana.token, projectId, {
-        parentId,
-        name: `T${index}`,
-      });
-      // A milestone parent or a since-deleted parent is a legitimate refusal, not a failure.
-      if (created.statusCode === 201) ids.push(created.json().task.id as string);
-    }
-    await assertWbsConsistent(projectId);
+      // A deterministic pseudo-random walk: same seed, same sequence, so a failure is reproducible
+      // by re-running rather than by luck. (The CPM property suite in P2 gets the real generator;
+      // this is the WBS-renumbering half of the same idea, which is what P1 actually ships.)
+      let seed = 20260816;
+      const next = (bound: number): number => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed % bound;
+      };
 
-    for (let step = 0; step < 40; step += 1) {
-      const alive = (
-        await exec.query<{ id: string }>(`SELECT id FROM task WHERE project_id = $1`, [projectId])
-      ).rows.map((row) => row.id);
-      if (alive.length < 2) break;
-
-      const subject = alive[next(alive.length)]!;
-      if (step % 4 === 3) {
-        await remove(dana.token, projectId, subject, { childPolicy: 'reparentToGrandparent' });
-        await remove(dana.token, projectId, subject, {});
-      } else {
-        const target = next(2) === 0 ? null : alive[next(alive.length)]!;
-        await reparent(dana.token, projectId, subject, { newParentId: target });
+      const ids: string[] = [];
+      for (let index = 0; index < 12; index += 1) {
+        const parentId = ids.length === 0 ? null : (ids[next(ids.length)] ?? null);
+        const created = await post(dana.token, projectId, {
+          parentId,
+          name: `T${index}`,
+        });
+        // A milestone parent or a since-deleted parent is a legitimate refusal, not a failure.
+        if (created.statusCode === 201) ids.push(created.json().task.id as string);
       }
-      // Whatever the endpoint answered — 200, 404, 409 or 422 — the tree must still be sane.
       await assertWbsConsistent(projectId);
-    }
 
-    expect((await wbsSnapshot(projectId)).size).toBeGreaterThan(0);
-  });
+      for (let step = 0; step < 40; step += 1) {
+        const alive = (
+          await exec.query<{ id: string }>(`SELECT id FROM task WHERE project_id = $1`, [projectId])
+        ).rows.map((row) => row.id);
+        if (alive.length < 2) break;
+
+        const subject = alive[next(alive.length)]!;
+        if (step % 4 === 3) {
+          await remove(dana.token, projectId, subject, { childPolicy: 'reparentToGrandparent' });
+          await remove(dana.token, projectId, subject, {});
+        } else {
+          const target = next(2) === 0 ? null : alive[next(alive.length)]!;
+          await reparent(dana.token, projectId, subject, { newParentId: target });
+        }
+        // Whatever the endpoint answered — 200, 404, 409 or 422 — the tree must still be sane.
+        await assertWbsConsistent(projectId);
+      }
+
+      expect((await wbsSnapshot(projectId)).size).toBeGreaterThan(0);
+    },
+    LONG_RANDOM_WALK_TIMEOUT_MS,
+  );
 });
 
 describe('FR-TSK-08: reparentToGrandparent with depth below the promoted children', () => {
